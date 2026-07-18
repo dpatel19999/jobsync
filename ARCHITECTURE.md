@@ -28,8 +28,7 @@
 | Module | New files | Plugs into |
 |---|---|---|
 | Gmail auto-tracking | `src/lib/gmail/client.ts`, `classifier.ts`, `src/actions/gmail.actions.ts`, `GmailAccount` prisma model | Calls existing `job.actions.ts` to update status |
-| ATS keyword scoring (EN) | `src/lib/ats/scorer.ts`, `src/actions/atsScore.actions.ts`, add `atsScoreBefore/After` to `Job` model | Runs alongside existing `automation.actions.ts` match flow |
-| ATS keyword scoring (DE) | `src/lib/ats/scorer-de.ts` — compound-noun decomposition + stemming, separate from EN scorer | Same as above, different algorithm |
+| ATS keyword scoring (EN+DE) ✅ done | See "ATS keyword scoring module" section below | `src/actions/atsScore.actions.ts` reuses `automation.actions.ts`'s AI-calling pattern for extraction |
 | Cold email ✅ done | `generateColdEmail` in existing `coverLetter.actions.ts`, `ColdEmail` prisma model (mirrors `CoverLetter`), `src/lib/ai/prompts/cold-email/`, `GenerateColdEmailButton.tsx` | Reuses `automation.actions.ts`'s AI-calling pattern |
 | Natural-writing + guardrail pass | New shared prompt layer in `src/lib/ai/`, applied to all three generation functions above | Prompt-layer only, no new UI |
 | Recruiter-persona scoring | `src/lib/review/persona-score.ts` — weighted rubric from persona doc (Technical Fit 25%, Experience 20%, Cultural Fit 20%, Communication 15%, Motivation 10%, Availability 10%) | Runs after generation, before showing user the draft |
@@ -38,7 +37,46 @@
 
 ## Data model additions needed (Prisma schema)
 - `GmailAccount` (encrypted OAuth tokens, mirrors `ApiKey` pattern)
-- `ColdEmail` (mirrors `CoverLetter`)
-- `atsScoreBefore`, `atsScoreAfter` fields on `Job`
+- `ColdEmail` (mirrors `CoverLetter`) — ✅ done
+- `JobKeyword`, `Job.atsScore`/`atsScoreData` — ✅ done (see below)
 - `PrepQuestion` (linked to `Job`, round type, question, draft answer)
-- `region` field on `Job` (for DIN formatting / B1 German toggle)
+- `region` field on `Job` (for DIN formatting / B1 German toggle) — still not
+  built; ATS scoring's language detection is deliberately NOT this field, see
+  below
+
+## ATS keyword scoring module (done, branch `feature/ats-scoring`)
+
+Layout under `src/lib/ats/`:
+- `core/scorer.ts` — language-agnostic: pure set comparison, weighting
+  (default 1 per keyword), and percentage math. Takes the resume's token
+  `Set<string>` and a list of `{ keyword, tokens, weight? }`, returns
+  `{ score, matched, missing }`. No tokenization/stemming/language logic here.
+- `adapters/en.ts` — tokenize (word-boundary regex) + Snowball English stem
+  (`snowball-stemmers`).
+- `adapters/de.ts` + `de-compound.ts` + `de-dictionary.ts` — tokenize, then for
+  words ≥8 chars try dictionary-driven recursive compound splitting (see
+  DECISIONS.md for why this is self-built, not a library), then Snowball
+  German stem. **Important**: a word's required match tokens are its
+  decomposed-part stems *or* its whole-word stem, never both (see DECISIONS.md
+  — combining them over-constrains matching against inflected forms).
+- `language-detect.ts` — `franc-min`, EN/DE only, no persisted field (see
+  DECISIONS.md).
+- `index.ts` — orchestrator: `scoreResumeAgainstKeywords(resumeText, keywords,
+  jobDescriptionText)` picks the adapter from detected language and runs it
+  through the core.
+
+`src/actions/atsScore.actions.ts`: `extractJobKeywords` (Ollama call via
+`automation.actions.ts`'s non-streaming pattern, saves `JobKeyword` rows with
+`source: "extracted"`, preserves any `source: "manual"` ones), `addJobKeyword`
+/ `removeJobKeyword` (manual edit), `scoreJob` (resolves a resume the same way
+`generateColdEmail` does — job's own, else user default, else most recent —
+then scores and saves `Job.atsScore`/`atsScoreData`).
+
+UI: `AtsScoreSection.tsx`, wired into `JobDetails.tsx` next to the cold-email
+button. Dialog shows the score (reuses `CircularScore`), detected language,
+resume used, and a badge list of keywords (green=matched, red=missing,
+neutral=unscored) with add/remove.
+
+New prompt module: `src/lib/ai/prompts/ats-keywords/` (system + user prompts),
+wired into the `@/lib/ai` and `@/lib/ai/prompts` barrels the same way as
+cold-email's.

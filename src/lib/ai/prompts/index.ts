@@ -36,3 +36,9 @@ export {
   COLD_EMAIL_SYSTEM_PROMPT,
   buildColdEmailPrompt,
 } from "./cold-email";
+
+// ATS Keyword Extraction exports
+export {
+  ATS_KEYWORDS_SYSTEM_PROMPT,
+  buildAtsKeywordsPrompt,
+} from "./ats-keywords";

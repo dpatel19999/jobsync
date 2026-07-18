@@ -30,6 +30,28 @@ export interface Tag {
   };
 }
 
+export interface JobKeyword {
+  id: string;
+  jobId: string;
+  text: string;
+  source: string;
+  createdAt: Date;
+}
+
+export interface AtsScoredKeyword {
+  keyword: string;
+  weight: number;
+}
+
+export interface AtsScoreData {
+  language: "en" | "de";
+  matched: AtsScoredKeyword[];
+  missing: AtsScoredKeyword[];
+  resumeId: string;
+  resumeTitle: string;
+  scoredAt: string;
+}
+
 export interface JobResponse {
   id: string;
   userId: string;
@@ -55,6 +77,9 @@ export interface JobResponse {
   ColdEmail?: ColdEmail;
   matchScore?: number | null;
   matchData?: string | null;
+  Keywords?: JobKeyword[];
+  atsScore?: number | null;
+  atsScoreData?: string | null;
   tags?: Tag[];
   createdVia?: string | null;
   discoveryStatus?: string | null;

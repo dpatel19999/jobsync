@@ -243,6 +243,7 @@ export const getJobDetails = async (
         },
         CoverLetter: true,
         ColdEmail: true,
+        Keywords: true,
         tags: true,
       },
     });

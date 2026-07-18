@@ -16,6 +16,8 @@ export {
   buildAutomationJobMatchPrompt,
   COLD_EMAIL_SYSTEM_PROMPT,
   buildColdEmailPrompt,
+  ATS_KEYWORDS_SYSTEM_PROMPT,
+  buildAtsKeywordsPrompt,
 } from "./prompts";
 
 // Analysis tools

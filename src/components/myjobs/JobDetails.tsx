@@ -58,6 +58,7 @@ import { AddJob } from "./AddJob";
 import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toast } from "../ui/use-toast";
 import { GenerateColdEmailButton } from "./GenerateColdEmailButton";
+import { AtsScoreSection } from "./AtsScoreSection";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -189,6 +190,12 @@ function JobDetails({
           <GenerateColdEmailButton
             jobId={job.id}
             existingContent={job.ColdEmail?.content}
+          />
+          <AtsScoreSection
+            jobId={job.id}
+            initialKeywords={job.Keywords ?? []}
+            initialScore={job.atsScore}
+            initialScoreData={job.atsScoreData}
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

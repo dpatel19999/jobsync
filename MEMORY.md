@@ -1,78 +1,110 @@
 # MEMORY.md — Session Handoff
 
 ## Last updated
-Cold email generation feature complete and verified, on `feature/cold-email`.
-Not merged to main — left for user review.
+`feature/cold-email` merged into `main`. ATS keyword scoring (EN+DE) feature
+complete and verified, still uncommitted on `feature/ats-scoring` (based on
+`feature/cold-email`'s commit, which is now part of `main`'s history) — user
+hasn't given the go-ahead to commit it yet.
 
 ## Where we actually are right now
 1. ✅ Baseline confirmed running: `npm install`, `.env`, migrations, `npm run dev`
    on port 3737 all work natively (no Docker).
-2. ✅ **Cold email generation shipped** on branch `feature/cold-email`:
-   - `ColdEmail` Prisma model added (mirrors `CoverLetter`), migration
-     `20260718140521_add_cold_email` applied.
-   - `Job.coldEmailId` relation added, same shape as `Job.coverLetterId`.
-   - `generateColdEmail(profileId, jobId)` added to `src/actions/coverLetter.actions.ts`.
-     Loads resume via job's resume → user's default resume → most recent resume
-     on the profile (first one found). Calls `getModel()` + `generateText()`
-     (the `automation.actions.ts` non-streaming pattern — `coverLetter.actions.ts`
-     itself turned out to have zero AI generation, contrary to ARCHITECTURE.md's
-     original assumption; see DECISIONS.md).
-   - New prompt module `src/lib/ai/prompts/cold-email/` (system + user prompts):
-     4-6 sentences, facts-only from the loaded resume, must name the company and
-     one concrete JD detail, bans the CLAUDE.md AI-writing-tell list.
-   - UI: `GenerateColdEmailButton` component, wired into `JobDetails.tsx` next to
-     the existing "Match with AI" button. Simple dialog shows the generated text
-     after save (no new page).
-   - Added `getCurrentProfileId()` to `profile.actions.ts` (small helper so the
-     client button can resolve the profileId without threading a new prop through
-     the job detail page).
-3. ✅ **Verified end-to-end for real**, not just compiled:
-   - Fixed `.env`'s `OLLAMA_BASE_URL` (was `host.docker.internal`, unreachable
-     outside Docker; now `127.0.0.1:11434`).
-   - Tried a user-supplied Gemini key first — authenticated fine but every model
-     (`gemini-2.0-flash-lite`, `gemini-1.5-flash`, `gemini-2.0-flash`) returned an
-     immediate zero-quota free-tier error. Not pursued further per user's call.
-   - Switched to local Ollama (`llama3.1`, confirmed running via `ollama list`).
-     Ran a full signup → resume (contact info + summary + one work experience,
-     synthetic test data) → job (Vector Robotics GmbH, Berlin, detailed JD) →
-     click "Generate Cold Email" flow via a scripted Playwright session.
-   - Real generated output referenced only resume facts (Northline Payments,
-     "reduced API p95 latency by 40%"), named the company, referenced concrete
-     JD details (robotic fleet coordination platform, Node.js/PostgreSQL,
-     warehouse-automation team, real-time order-routing), stayed to ~4 sentences,
-     no AI-writing tells. Confirmed saved in the `ColdEmail` table via direct
-     Prisma query, correctly linked via `Job.coldEmailId`.
-   - Leftover in local dev.db: one test user
-     (`coldemail.test.1784385238710@example.com` / password `TestPassword123!`),
-     with a test resume, job, and cold email under company "Vector Robotics
-     GmbH" / "Northline Payments". Harmless (test-labeled), left in place rather
-     than risk an ad-hoc multi-table delete — user can remove via the UI if
-     wanted.
-4. ⚠️ `.env` now has a real Gemini API key from the user (`GEMINI_API_KEY`) that
-   hit zero quota — may be worth rotating/removing if unused going forward.
-   `.env` is git-ignored (`*.env*` in `.gitignore`), so nothing leaked to the repo.
+2. ✅ **Cold email generation**: built on `feature/cold-email` (`af65bc7`),
+   **merged into `main`** via merge commit `c9b4621`. Confirmed post-merge:
+   working tree clean, all `ColdEmail` files/model present, all migrations
+   applied, `tsc` shows zero new errors. `main` is currently 4 commits ahead
+   of `origin/main` (not pushed — never asked to).
+3. ✅ **ATS keyword scoring (EN+DE)** built on `feature/ats-scoring`, branched
+   from `feature/cold-email` (not `main` at the time) because its UI sits next
+   to the cold-email button. Now that cold-email is merged into `main`,
+   `feature/ats-scoring`'s base commit is an ancestor of `main`, so it's
+   already correctly positioned — **no rebase needed**, it can go straight to
+   `main` whenever it's committed and approved. Still fully uncommitted
+   (working tree has the changes; verified this survives branch-switching —
+   was stashed during the merge work and popped back cleanly afterward).
+
+   What was built:
+   - `JobKeyword` Prisma model + `Job.atsScore`/`atsScoreData` fields,
+     migration `20260718153558_add_ats_keyword_scoring`.
+   - `src/lib/ats/` — language-agnostic scoring core (`core/scorer.ts`, pure
+     set/weight/percentage math) + EN/DE adapters (`adapters/en.ts`,
+     `adapters/de.ts` + `de-compound.ts` + `de-dictionary.ts`) + language
+     detection (`language-detect.ts`, `franc-min`). Full design rationale in
+     ARCHITECTURE.md's "ATS keyword scoring module" section.
+   - German compound splitting is **self-built** (dictionary-driven recursive
+     splitter against the `dictionary-de` npm package's Hunspell wordlist) —
+     no maintained JS library exists for this; researched and confirmed
+     before building, user picked this approach over an LLM-based or Python-
+     subprocess alternative. Stemming for both EN and DE uses
+     `snowball-stemmers` (one dependency, real Snowball algorithms).
+   - New deps added: `snowball-stemmers`, `dictionary-de`, `franc-min`,
+     `@types/snowball-stemmers` (dev).
+   - `src/actions/atsScore.actions.ts` — `extractJobKeywords` (Ollama call,
+     same non-streaming `getModel()`+`generateText()` convention as
+     `automation.actions.ts`/cold email), `addJobKeyword`/`removeJobKeyword`
+     (manual edit, `source: "manual"` vs `"extracted"`), `scoreJob` (resolves
+     a resume the same way `generateColdEmail` does: job's own → user default
+     → most recent, then scores and saves).
+   - New prompt module `src/lib/ai/prompts/ats-keywords/` wired into the
+     `@/lib/ai` barrels the same way cold-email's is.
+   - UI: `AtsScoreSection.tsx` (dialog: score via `CircularScore`, detected
+     language, resume used, keyword badges with add/remove), wired into
+     `JobDetails.tsx` next to the cold-email button.
+4. ✅ **Verified end-to-end for real, twice over**:
+   - Direct unit-style verification (via `tsx`, against the actual repo
+     modules, not mocks) of the tricky German logic: plural/case stemming
+     ("Datenanalysen" resume text correctly matches "Datenanalyse" keyword),
+     multi-part compound decomposition ("Datenanalyseprojekten" → daten +
+     analyse + projekt, recursively), and correct rejection of over-permissive
+     matches (a keyword genuinely missing a required part is still reported
+     missing). Also confirmed English stemming and EN/DE language detection.
+   - One bug caught and fixed during this direct testing: the DE adapter
+     originally required *both* a word's whole-word stem *and* its compound
+     sub-part stems simultaneously, which over-constrained matching against
+     inflected forms. Fixed to use one or the other, never both (see
+     DECISIONS.md). Also fixed the compound splitter to apply linking-
+     morpheme stripping to *both* sides of a candidate split (it only did the
+     left side originally), and to recurse properly for 3+-part compounds.
+   - Full scripted Playwright UI run: signup → resume (contact info + summary
+     + one work experience mentioning Node.js/PostgreSQL/AWS/Docker,
+     synthetic test data) → job at "Meridian Cloud Systems" with a detailed
+     English JD → clicked "Extract Keywords" (real Ollama/llama3.1 call, took
+     ~36s, produced 15 sensible keywords: Node.js, PostgreSQL, AWS,
+     Kubernetes, GraphQL, CI/CD, REST API design, etc.) → clicked "Score
+     Resume" → got 27% (4/15 matched: Node.js, PostgreSQL, AWS, and "Backend
+     engineering" via stemming against the resume's "Backend Engineer"
+     headline). Verified the exact matched/missing breakdown in the DB
+     matches what a careful manual read of the resume vs. keyword list would
+     predict — no logic surprises.
+   - All test data (test user, resume, job, 15 keywords, test
+     companies/titles/locations) cleaned up from local `dev.db` afterward via
+     direct Prisma queries, same careful multi-table teardown as the
+     cold-email session. Confirmed via sweep queries: zero leftover rows.
 5. Pre-existing, unrelated to this feature: `npx tsc --noEmit` reports
    `date-fns`/`lucide-react` type errors across most of the codebase (stale
-   `node_modules` types vs. installed versions). Not introduced by this session
-   — confirmed zero new type errors from the cold-email changes specifically.
+   `node_modules` types vs. installed versions) — confirmed zero *new* type
+   errors from the ATS scoring changes specifically.
 
 ## Immediate next steps (in order)
-1. User reviews `feature/cold-email` and merges to `main` manually (not done
-   automatically, per working agreement).
-2. Optionally clean up the leftover test account/data in dev.db (see above).
-3. Start next feature: **ATS keyword scoring (EN)** — per ARCHITECTURE.md's
-   planned module: `src/lib/ats/scorer.ts`, `src/actions/atsScore.actions.ts`,
-   add `atsScoreBefore`/`atsScoreAfter` to the `Job` model. German scoring
-   (compound-noun decomposition) is a separate follow-up module, not part of
-   the first pass.
+1. Currently on branch `feature/ats-scoring` with the ATS scoring work
+   uncommitted in the working tree (verified it survives branch-switching via
+   `git stash`/`stash pop`, so it's safe, just not yet a commit). Waiting on
+   the user to say "commit this" before doing so — same pattern as cold email.
+2. Once committed and approved: merge `feature/ats-scoring` straight into
+   `main` (no rebase needed — its base commit is already an ancestor of
+   `main` now that cold-email merged).
+3. `main` itself is 4 commits ahead of `origin/main`, never pushed — no
+   request to push yet either.
+4. Next planned feature per the original list: recruiter-persona weighted
+   scoring, or Gmail auto-tracking — not yet started, no decisions made.
 
 ## Full feature list agreed (see ARCHITECTURE.md for technical detail)
-Gmail auto-tracking (with confirm-on-downgrade), EN+DE ATS scoring, CV+cover
-letter+cold email tailoring (docx+pdf output), JD-adaptive CV structure,
-company-mismatch guardrail, bilingual EN/German-B1 output, DIN 5008 German
-formatting, no-invented-facts guardrail, natural-writing pass, AI-writing-tell
-ban list, recruiter-persona weighted scoring, interview prep Q&A module,
-LinkedIn networking assistant (manual-send only).
+Gmail auto-tracking (with confirm-on-downgrade), EN+DE ATS scoring ✅ done,
+CV+cover letter+cold email tailoring (docx+pdf output), JD-adaptive CV
+structure, company-mismatch guardrail, bilingual EN/German-B1 output, DIN 5008
+German formatting, no-invented-facts guardrail, natural-writing pass,
+AI-writing-tell ban list, recruiter-persona weighted scoring, interview prep
+Q&A module, LinkedIn networking assistant (manual-send only).
 
 ## Corrections to ARCHITECTURE.md worth knowing
 - `coverLetter.actions.ts` has **no AI generation** — it's pure manual CRUD
@@ -80,11 +112,19 @@ LinkedIn networking assistant (manual-send only).
   `AddJob.tsx`). The real AI-calling convention in this codebase lives in
   `automation.actions.ts` (`analyzeDiscoveredJob`, non-streaming) and in
   `src/app/api/ai/resume/match/route.ts` (streaming, client-picked model, used
-  by `AiJobMatchSection`). Any future AI feature should pick whichever of those
-  two shapes fits (streaming+picker for long-running user-facing analysis,
-  non-streaming for a quick save-and-done action like cold email).
+  by `AiJobMatchSection`). Cold email and ATS keyword extraction both use the
+  non-streaming convention.
+- ARCHITECTURE.md's original ATS scoring plan assumed a fixed
+  `atsScoreBefore`/`atsScoreAfter` pair on `Job` (for before/after CV-tailoring
+  comparison) and a persisted `region`/`language` field — neither was built.
+  Current scoring is a single current `atsScore`/`atsScoreData`, and language
+  is detected fresh each time from the job description text via `franc-min`,
+  not stored. The before/after comparison and persisted region/language field
+  are still open for whenever the CV-tailoring and DIN-formatting phases
+  actually start.
 
 ## Open items not yet decided
-- None outstanding for cold email. ATS keyword scoring's exact keyword-matching
-  approach (simple TF vs. something smarter) not yet decided — first thing to
-  raise with the user when that feature starts.
+- Whether/when to add a persisted before/after ATS score comparison (ties
+  into the not-yet-built CV-tailoring feature).
+- Which feature to build next after ATS scoring is merged — not yet raised
+  with the user.
