@@ -30,7 +30,7 @@
 | Gmail auto-tracking | `src/lib/gmail/client.ts`, `classifier.ts`, `src/actions/gmail.actions.ts`, `GmailAccount` prisma model | Calls existing `job.actions.ts` to update status |
 | ATS keyword scoring (EN+DE) ✅ done | See "ATS keyword scoring module" section below | `src/actions/atsScore.actions.ts` reuses `automation.actions.ts`'s AI-calling pattern for extraction |
 | Cold email ✅ done | `generateColdEmail` in existing `coverLetter.actions.ts`, `ColdEmail` prisma model (mirrors `CoverLetter`), `src/lib/ai/prompts/cold-email/`, `GenerateColdEmailButton.tsx` | Reuses `automation.actions.ts`'s AI-calling pattern |
-| Natural-writing + guardrail pass | New shared prompt layer in `src/lib/ai/`, applied to all three generation functions above | Prompt-layer only, no new UI |
+| Natural-writing + guardrail pass ✅ done | See "Writing guardrails module" section below | `coverLetter.actions.ts`'s `generateColdEmail` calls `generateVerifiedContent` instead of `generateText` directly |
 | Recruiter-persona scoring | `src/lib/review/persona-score.ts` — weighted rubric from persona doc (Technical Fit 25%, Experience 20%, Cultural Fit 20%, Communication 15%, Motivation 10%, Availability 10%) | Runs after generation, before showing user the draft |
 | Interview prep | `src/actions/interviewPrep.actions.ts`, new `PrepQuestion` model | New UI page, links to `Job` |
 | LinkedIn networking assistant | `src/lib/linkedin/finder.ts` (manual-trigger search/draft only, no auto-send) | New UI section, reminder tied to `Job` |
@@ -80,3 +80,50 @@ neutral=unscored) with add/remove.
 New prompt module: `src/lib/ai/prompts/ats-keywords/` (system + user prompts),
 wired into the `@/lib/ai` and `@/lib/ai/prompts` barrels the same way as
 cold-email's.
+
+## Writing guardrails module (done, branch `feature/writing-guardrails`)
+
+Layout under `src/lib/ai/guardrails/`, exported via the `@/lib/ai` barrel so
+any generation feature imports it rather than duplicating logic:
+- `writing-tells.ts` — `AI_WRITING_TELL_RULES`, a single shared prompt-text
+  constant with the CLAUDE.md AI-writing-tell ban list (expanded from the
+  copy that used to live directly inside `cold-email/system.ts`). Also
+  exports `detectWritingTells(text)`, a regex-based heuristic detector for
+  the same patterns (rule-of-three adjective stacking, em-dash overuse,
+  "not just X, it's Y", Furthermore/Moreover openers, inflated-significance
+  closers, buzzword filler) — soft/advisory only, used by
+  `generateVerifiedContent` to `console.warn` (non-blocking) and by
+  verification scripts, not to gate/regenerate.
+- `factual-accuracy.ts` — `verifyFactualAccuracy(model, draft, { resumeText,
+  jobText })`, a second non-streaming Ollama call whose only job is to read
+  a generated draft against the source resume/job text and report any claim
+  about the candidate that isn't supported by those source facts. This is a
+  hard constraint (CLAUDE.md rule #1) — a stricter generation prompt alone
+  isn't a check, it verifies the actual output.
+- `generate-verified.ts` — `generateVerifiedContent({ model, system, prompt,
+  temperature, facts })` orchestrates: generate → verify → on failure,
+  regenerate once with the unsupported claims appended to the prompt →
+  verify again → if still failing, return the content anyway with a
+  non-null `warning` string instead of silently returning it as clean. Every
+  free-text outbound content generator (cold email now; future cover-letter
+  AI-gen / CV tailoring) should call this instead of `generateText` directly.
+
+`generateColdEmail` in `coverLetter.actions.ts` now calls
+`generateVerifiedContent` instead of `generateText`, and returns a `warning`
+field alongside `content`; `GenerateColdEmailButton.tsx` surfaces it as both
+a destructive toast and an inline banner in the preview dialog if present.
+Cover letters were checked and confirmed to still have zero AI generation
+(pure manual CRUD) — so cold email is currently the only feature wired to
+this module; the module itself doesn't assume that will stay true.
+
+**Known limitation (flagged for review, see DECISIONS.md)**: the local 8B
+`llama3.1` model used as the fact-checker is prone to false positives —
+flagging reasonable paraphrases, rounded durations, or a job title that
+appears elsewhere in the source text as "unsupported." Confirmed via direct
+testing: it reliably catches genuinely fabricated claims (a fake employer,
+a fake certification) but also sometimes flags legitimate, fact-supported
+phrasing. The design already treats a failed check as "surface a warning for
+human review," not "block/discard," which keeps this failure mode safe
+(over-flagging costs a manual glance; under-flagging would let a fabrication
+through silently) but it does mean warnings should be read as "worth a
+second look," not "definitely wrong."

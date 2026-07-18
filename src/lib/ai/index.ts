@@ -23,6 +23,18 @@ export {
 // Analysis tools
 export { AIUnavailableError } from "./tools";
 
+// Guardrails (factual-accuracy + natural-writing, shared across generation features)
+export {
+  AI_WRITING_TELL_RULES,
+  detectWritingTells,
+  verifyFactualAccuracy,
+  generateVerifiedContent,
+  type FactualSourceFacts,
+  type FactualCheckResult,
+  type GenerateVerifiedContentArgs,
+  type GenerateVerifiedContentResult,
+} from "./guardrails";
+
 // Resume preprocessing
 export {
   preprocessResume,

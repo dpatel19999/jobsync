@@ -117,3 +117,42 @@ Format: Decision — Rationale
   `getModel()` + `generateText()` pattern** (same convention as cold email),
   not a new AI-calling shape — extraction is a quick save-and-done action, not
   a long-running streamed analysis.
+
+- **Factual-accuracy guardrail is a second lightweight Ollama call, not just a
+  stricter prompt** (`src/lib/ai/guardrails/factual-accuracy.ts`) — a prompt
+  asking the model to "only use real facts" is still just a request; verifying
+  the actual generated output against the source resume/job text is the only
+  way to catch a violation after the fact. On failure it regenerates once with
+  the specific unsupported claims appended to the prompt, then if still
+  failing returns the content anyway with a non-null `warning` rather than
+  silently returning unverified content as if it were clean — matches
+  CLAUDE.md's "flag anything unverified instead of including it," which
+  describes flagging, not blocking.
+
+- **Natural-writing ban list extracted into one shared module
+  (`src/lib/ai/guardrails/writing-tells.ts`)**, not duplicated per feature —
+  `cold-email/system.ts`'s prompt now imports `AI_WRITING_TELL_RULES` instead
+  of embedding its own copy. Kept as a soft/advisory constraint (embedded in
+  the generation prompt, logged via `console.warn` if `detectWritingTells`
+  still finds a hit post-generation) rather than a hard regenerate-and-block
+  gate like the factual-accuracy guardrail — tone is subjective enough that
+  auto-rejecting a draft over a heuristic regex match would produce more false
+  rejections than it prevents bad tone.
+
+- **FLAGGED FOR REVIEW: local `llama3.1` (8B, CPU-only) is an unreliable
+  strict fact-checker** — confirmed via direct testing (see MEMORY.md) that
+  it reliably catches genuinely fabricated claims (invented employer,
+  invented certification) but also produces false positives on legitimate
+  paraphrased content (e.g. flagged a resume's own "Backend Engineer"
+  headline as unsupported, flagged "three years" as unsupported for a
+  2022–2025 role). One round of prompt tightening (explicit
+  paraphrase-tolerance rules, added during this session) did not eliminate
+  it — this reads as a small-model attention/reading-comprehension limit,
+  not a prompt-wording problem, so further prompt iteration was stopped
+  rather than chased indefinitely. Sensible choice made and shipped: keep the
+  guardrail (over-flagging is a safer failure mode than under-flagging, and
+  the design surfaces a warning rather than blocking/discarding), document
+  the limitation, and revisit only if it proves too noisy in real usage.
+  Future options if it does: swap the verifier model, require 2/2 agreement
+  across two independent fact-check calls before warning, or let the user
+  dismiss/suppress a specific flagged claim.

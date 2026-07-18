@@ -27,6 +27,7 @@ export function GenerateColdEmailButton({
   const [content, setContent] = useState<string | null>(
     existingContent ?? null
   );
+  const [warning, setWarning] = useState<string | null>(null);
 
   const onGenerate = () => {
     startTransition(async () => {
@@ -41,10 +42,12 @@ export function GenerateColdEmailButton({
         return;
       }
 
-      const { success, message, content: generated } = await generateColdEmail(
-        profileId,
-        jobId
-      );
+      const {
+        success,
+        message,
+        content: generated,
+        warning,
+      } = await generateColdEmail(profileId, jobId);
 
       if (!success) {
         toast({
@@ -56,11 +59,21 @@ export function GenerateColdEmailButton({
       }
 
       setContent(generated);
+      setWarning(warning ?? null);
       setDialogOpen(true);
-      toast({
-        variant: "success",
-        description: "Cold email generated and saved.",
-      });
+
+      if (warning) {
+        toast({
+          variant: "destructive",
+          title: "Review before sending",
+          description: warning,
+        });
+      } else {
+        toast({
+          variant: "success",
+          description: "Cold email generated and saved.",
+        });
+      }
     });
   };
 
@@ -84,6 +97,11 @@ export function GenerateColdEmailButton({
           <DialogHeader>
             <DialogTitle>Cold Email</DialogTitle>
           </DialogHeader>
+          {warning && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-sm text-destructive">
+              {warning}
+            </p>
+          )}
           <textarea
             readOnly
             value={content ?? ""}

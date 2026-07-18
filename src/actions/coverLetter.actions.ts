@@ -3,13 +3,13 @@ import prisma from "@/lib/db";
 import { handleError } from "@/lib/utils";
 import { getCurrentUser } from "@/utils/user.utils";
 import { APP_CONSTANTS } from "@/lib/constants";
-import { generateText } from "ai";
 import {
   getModel,
   preprocessResume,
   preprocessJob,
   COLD_EMAIL_SYSTEM_PROMPT,
   buildColdEmailPrompt,
+  generateVerifiedContent,
 } from "@/lib/ai";
 import { TEMPERATURES } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
@@ -167,8 +167,9 @@ export const deleteCoverLetterById = async (
 
 // Generates a short cold email for a specific job, from the same resume/profile
 // data the cover letter flow uses, then saves it as a ColdEmail linked to the job.
-// Mirrors automation.actions.ts's analyzeDiscoveredJob for the AI-calling
-// convention (getModel + generateText, non-streaming server action).
+// Uses generateVerifiedContent (src/lib/ai/guardrails) instead of calling
+// generateText directly, so the factual-accuracy + natural-writing guardrails
+// apply the same way any other generation feature would use them.
 export const generateColdEmail = async (
   profileId: string,
   jobId: string
@@ -246,7 +247,7 @@ export const generateColdEmail = async (
 
     const companyName = job.Company?.label ?? "the company";
 
-    const result = await generateText({
+    const { content, warning } = await generateVerifiedContent({
       model,
       system: COLD_EMAIL_SYSTEM_PROMPT,
       prompt: buildColdEmailPrompt(
@@ -255,9 +256,12 @@ export const generateColdEmail = async (
         companyName
       ),
       temperature: TEMPERATURES.FEEDBACK,
+      facts: {
+        resumeText: resumePre.data.normalizedText,
+        jobText: jobPre.data.normalizedText,
+      },
     });
 
-    const content = result.text.trim();
     const title = `${companyName} - ${job.JobTitle?.label ?? "Cold Email"}`;
 
     const coldEmail = await prisma.coldEmail.create({
@@ -269,7 +273,7 @@ export const generateColdEmail = async (
       data: { coldEmailId: coldEmail.id },
     });
 
-    return { success: true, data: coldEmail, content };
+    return { success: true, data: coldEmail, content, warning };
   } catch (error) {
     const msg = "Failed to generate cold email.";
     return handleError(error, msg);

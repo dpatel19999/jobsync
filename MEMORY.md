@@ -1,10 +1,18 @@
 # MEMORY.md — Session Handoff
 
 ## Last updated
-`feature/cold-email` merged into `main`. ATS keyword scoring (EN+DE) feature
-complete and verified, still uncommitted on `feature/ats-scoring` (based on
-`feature/cold-email`'s commit, which is now part of `main`'s history) — user
-hasn't given the go-ahead to commit it yet.
+Working autonomously through a combined 2-phase task while the user was away:
+Phase 1 (natural-writing + factual-accuracy guardrails) is done, verified, and
+about to be committed + merged to `main`. Phase 2 (DIN 5008 + German B1
+region/language logic) is next, on its own branch off updated `main`, and per
+explicit instruction will be left uncommitted for review when the user's back.
+See "Open items not yet decided" for the one thing flagged for review rather
+than decided silently.
+
+Previously: both `feature/cold-email` and `feature/ats-scoring` committed and
+merged into `main` (fast-forward, no conflicts either time). Post-merge smoke
+test passed: signup/login, cold email generation, ATS keyword extraction +
+scoring all verified working on `main` itself.
 
 ## Where we actually are right now
 1. ✅ Baseline confirmed running: `npm install`, `.env`, migrations, `npm run dev`
@@ -15,13 +23,13 @@ hasn't given the go-ahead to commit it yet.
    applied, `tsc` shows zero new errors. `main` is currently 4 commits ahead
    of `origin/main` (not pushed — never asked to).
 3. ✅ **ATS keyword scoring (EN+DE)** built on `feature/ats-scoring`, branched
-   from `feature/cold-email` (not `main` at the time) because its UI sits next
-   to the cold-email button. Now that cold-email is merged into `main`,
-   `feature/ats-scoring`'s base commit is an ancestor of `main`, so it's
-   already correctly positioned — **no rebase needed**, it can go straight to
-   `main` whenever it's committed and approved. Still fully uncommitted
-   (working tree has the changes; verified this survives branch-switching —
-   was stashed during the merge work and popped back cleanly afterward).
+   from `feature/cold-email`. Committed as `cb0edb3`, fast-forwarded onto
+   `main` after `main` had cold-email merged in (no rebase needed — its base
+   was already an ancestor), then **merged into `main`** via fast-forward
+   (`main` now points at `cb0edb3` too). Both feature branch refs
+   (`feature/cold-email`, `feature/ats-scoring`) still exist locally but are
+   now fully contained in `main`'s history — safe to delete, not done since
+   never asked.
 
    What was built:
    - `JobKeyword` Prisma model + `Job.atsScore`/`atsScoreData` fields,
@@ -84,19 +92,73 @@ hasn't given the go-ahead to commit it yet.
    `date-fns`/`lucide-react` type errors across most of the codebase (stale
    `node_modules` types vs. installed versions) — confirmed zero *new* type
    errors from the ATS scoring changes specifically.
+6. ✅ **Post-merge smoke test on `main`** (fresh `npm run dev`, fresh test
+   account): signup PASS, login with existing credentials PASS, cold email
+   generation PASS (real Ollama call, ~124s, genuine content referencing only
+   resume facts), ATS keyword extraction PASS (7 keywords) + scoring PASS
+   (71% — 5/7 matched, "REST API"/"Kubernetes" correctly reported missing
+   since the test resume genuinely didn't mention them). All smoke-test data
+   cleaned from `dev.db` afterward.
+7. ✅ **Writing guardrails (factual-accuracy + natural-writing)** built on
+   `feature/writing-guardrails` (branched from `main` after item 6). Full
+   design in ARCHITECTURE.md's "Writing guardrails module" section,
+   rationale in DECISIONS.md. Summary:
+   - New `src/lib/ai/guardrails/` module: `writing-tells.ts` (shared
+     `AI_WRITING_TELL_RULES` prompt text + `detectWritingTells()` heuristic
+     detector), `factual-accuracy.ts` (`verifyFactualAccuracy()` — a second
+     Ollama call that checks a draft against source resume/job text),
+     `generate-verified.ts` (`generateVerifiedContent()` — orchestrates
+     generate → verify → regenerate-once-on-failure → warn-if-still-failing).
+   - `cold-email/system.ts` now imports `AI_WRITING_TELL_RULES` instead of
+     embedding its own copy of the ban list.
+   - `generateColdEmail` (`coverLetter.actions.ts`) calls
+     `generateVerifiedContent` instead of `generateText` directly, and
+     returns a `warning` field. `GenerateColdEmailButton.tsx` shows it as a
+     destructive toast + an inline banner in the preview dialog.
+   - Checked for other AI-generation features needing this: cover letters are
+     still pure manual CRUD (no AI-gen), so cold email is the only feature
+     wired in for now; job-match/resume-review analysis outputs were judged
+     out of scope (they're recruiter-style feedback about the resume, not
+     first-person outbound content making claims as the candidate).
+   - **Verified via a real, temporary script run against local Ollama
+     (deleted after use, not committed)**: `detectWritingTells` correctly
+     fires on a cliche-loaded test string and stays quiet on clean
+     hand-written text. `verifyFactualAccuracy` reliably caught an injected
+     fully-fabricated draft (fake "led engineering org at Google," fake
+     "Kubernetes certification," fake "NASA aerospace background") as
+     unsupported, confirmed across two separate runs. A full
+     `generateVerifiedContent` end-to-end call against real Ollama
+     (llama3.1) produced usable cold-email content in both runs (203s and
+     298s).
+   - **Known limitation, flagged for review (see DECISIONS.md)**: the local
+     8B `llama3.1` fact-checker also produced false positives on clearly
+     legitimate content in testing — e.g. flagging the resume's own
+     "Backend Engineer" headline and a reasonable "three years" duration
+     paraphrase as unsupported. One prompt-tightening pass (explicit
+     paraphrase-tolerance rules) did not eliminate this; further iteration
+     was deliberately stopped rather than chased indefinitely, since it
+     looks like a small-model comprehension limit rather than a prompt
+     problem. Decision made and shipped: keep surfacing these as warnings
+     (safer than silently missing a real fabrication) rather than block or
+     discard content. Revisit only if real usage shows this is too noisy —
+     see DECISIONS.md for the mitigation options already considered.
+   - `npx tsc --noEmit` shows zero new errors from this phase (only the
+     pre-existing unrelated `lucide-react`/`date-fns` type-declaration noise).
 
 ## Immediate next steps (in order)
-1. Currently on branch `feature/ats-scoring` with the ATS scoring work
-   uncommitted in the working tree (verified it survives branch-switching via
-   `git stash`/`stash pop`, so it's safe, just not yet a commit). Waiting on
-   the user to say "commit this" before doing so — same pattern as cold email.
-2. Once committed and approved: merge `feature/ats-scoring` straight into
-   `main` (no rebase needed — its base commit is already an ancestor of
-   `main` now that cold-email merged).
-3. `main` itself is 4 commits ahead of `origin/main`, never pushed — no
-   request to push yet either.
-4. Next planned feature per the original list: recruiter-persona weighted
-   scoring, or Gmail auto-tracking — not yet started, no decisions made.
+1. `main` will be 6 commits ahead of `origin/main` once Phase 1 merges (still
+   never pushed — no request to push yet).
+2. **Feature order (user-specified):**
+   1. ✅ Natural-writing + guardrail pass — done, see item 7 above. Committed
+      on `feature/writing-guardrails`, merged to `main`.
+   2. 🔄 Region/language logic — DIN 5008 German cover-letter/email formatting
+      + B1 German cap, extending the Phase 1 guardrail module rather than
+      duplicating it. IN PROGRESS on `feature/region-language` (branched from
+      `main` after Phase 1 merged). Deliberately left **uncommitted** per
+      explicit instruction — stop and report back for review before
+      committing this one, unlike Phase 1.
+   3. Gmail integration — auto-tracking with confirm-on-downgrade, last. Not
+      started.
 
 ## Full feature list agreed (see ARCHITECTURE.md for technical detail)
 Gmail auto-tracking (with confirm-on-downgrade), EN+DE ATS scoring ✅ done,
@@ -126,5 +188,13 @@ Q&A module, LinkedIn networking assistant (manual-send only).
 ## Open items not yet decided
 - Whether/when to add a persisted before/after ATS score comparison (ties
   into the not-yet-built CV-tailoring feature).
-- Which feature to build next after ATS scoring is merged — not yet raised
-  with the user.
+- DIN 5008/B1 region-language phase: where the persisted `Job.region`/
+  `language` field finally gets built, and how it interacts with (vs.
+  replaces) ATS scoring's own fresh-detection approach — being decided now on
+  `feature/region-language`, see this file's top section once that phase
+  updates it.
+- **FLAGGED FOR REVIEW** (not silently decided): local `llama3.1`'s
+  reliability as a strict fact-checker for the factual-accuracy guardrail —
+  see DECISIONS.md's "FLAGGED FOR REVIEW" entry and item 7 above. Guardrail
+  ships as designed (safe failure mode either way), but worth the user's own
+  read once they're back.
