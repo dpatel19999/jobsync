@@ -286,3 +286,96 @@ Format: Decision — Rationale
   session touched, and patching it (e.g. raising the timeout) would mask
   environmental flakiness rather than fix a real bug. Flagged here in case
   it becomes a recurring CI annoyance as the suite continues to grow.
+
+- **Secrets audit finding (informational, already remediated upstream): a
+  hardcoded `AUTH_SECRET` default lived in `Dockerfile`/`docker-compose.yml`
+  in this repo's inherited history** (value starting `Cft42e...`, from the
+  upstream jobsync project; introduced and later removed before this fork's
+  own work began). It is NOT present in any current file — today's
+  docker-compose uses `${AUTH_SECRET:-your-auth-secret}` env interpolation —
+  and the user's local `.env` AUTH_SECRET was checked (boolean match only,
+  value never printed) and confirmed NOT to be that leaked default. No
+  rotation needed since the app is local-only and the secret in use isn't
+  the exposed one; the only way to purge it from history would be a rewrite,
+  which is not worth it for an inherited, unused default on a local repo.
+  Nothing else found: no AWS/Google/Slack/Stripe/GitHub token patterns, no
+  private keys, no credential files, no `.env` or `dev.db` ever committed
+  (both properly gitignored; only the placeholder `.env.example` is tracked).
+
+- **npm audit: 14 → 6 vulnerabilities via plain `npm audit fix` (no
+  breaking changes)** — fixed ws/engine.io/socket.io-adapter (high DoS),
+  brace-expansion + markdown-it (moderate ReDoS), diff + esbuild (low).
+  Remaining 6 all require semver-major changes and are FLAGGED, not forced:
+  (a) 4 high in the `promptfoo` chain (`@huggingface/transformers`,
+  `adm-zip`, `onnxruntime-node`) — dev-only eval tooling, never shipped or
+  run in the app itself, and every newer promptfoo also depends on the
+  vulnerable versions, so the only "fix" npm offers is a downgrade;
+  (b) `next`/`postcss` (moderate) — Next.js is already at the latest 15.5.x
+  patch; the advisory targets Next's *bundled* postcss copy and npm's
+  proposed fix is `next@9.3.3`, an absurd 6-major downgrade. Real fix
+  arrives whenever Next bumps its bundled postcss. Neither is worth
+  breaking the app over on a local-only deployment.
+
+- **Rate limiting added to the three Ollama-calling server actions
+  (`generateColdEmail`, `extractJobKeywords`, `analyzeDiscoveredJob`) by
+  reusing the existing `checkRateLimit`** (in-memory, 5 req/min/user, same
+  limiter the AI API routes already used) rather than writing a second
+  mechanism. The gap: the API routes were protected but the newer
+  action-based generate buttons weren't, and each click can hold a CPU-only
+  Ollama call for 30–130s — rapid duplicate clicks would stack them.
+  `scoreJob` deliberately NOT rate-limited: it's pure local scoring math,
+  no model call.
+
+- **Prompt-injection fencing added as a guardrails module
+  (`src/lib/ai/guardrails/prompt-fencing.ts`)** — resume text and job
+  descriptions are untrusted input (scraped from job boards or pasted), and
+  instruction-shaped text inside them ("ignore previous instructions...")
+  goes straight into prompts. `fenceUntrustedContent()` wraps them in
+  explicit `<<<UNTRUSTED_DATA>>>` markers (stripping any embedded markers so
+  the input can't break out of its own fence), and `PROMPT_FENCING_RULES`
+  in each system prompt (cold email EN/DE, ATS keywords) instructs the
+  model to treat fenced content as data, never instructions.
+  Defense-in-depth alongside the existing factual-accuracy post-check, not
+  a replacement — chose delimiter fencing over pattern-based "sanitization"
+  (stripping suspicious phrases) because filtering text out of a resume/JD
+  corrupts legitimate content and is trivially bypassed.
+
+- **Auth review conclusions (NextAuth v5 beta, credentials provider):**
+  session handling now has an explicit `session: { strategy: "jwt", maxAge:
+  30 days }` in `auth.config.ts` (previously implicit framework default —
+  no behavior change, just documented intent; fine for a local single-user
+  app). Verified: CSRF protection and `httpOnly` cookies are NextAuth
+  built-ins; `secure` cookie flag auto-enables on HTTPS only, which is
+  correct for localhost HTTP; every server action file checks
+  `getCurrentUser()` except `auth.actions.ts` itself (signup/login — the
+  one file that must be unauthenticated); middleware protects
+  `/dashboard/*` and `/api/*` (except auth/mcp which have their own);
+  bcrypt cost 10 for password hashing; login failures return a generic
+  "Invalid credentials" (no user-existence oracle in the message itself).
+  FLAGGED, not fixed (bigger than this pass): (a) no rate limiting on
+  login/signup attempts — credential stuffing is theoretical on a local
+  app but worth doing when Gmail lands; (b) the signup flow has no
+  password-strength requirement beyond zod's 6-char minimum; (c) timing
+  difference between "user not found" (no bcrypt compare) and "wrong
+  password" (bcrypt compare) is a subtle user-enumeration side channel —
+  standard fix is comparing against a dummy hash, noted for later.
+
+- **Gmail-integration security prep (flagged for the upcoming phase, none
+  implemented now):** (a) store Gmail OAuth tokens exactly like the
+  existing `ApiKey` pattern — AES-encrypted at rest via `ENCRYPTION_KEY`,
+  never plaintext in the DB (the planned `GmailAccount` model in
+  ARCHITECTURE.md already assumes this; hold to it); (b) request the
+  narrowest scopes that work — `gmail.readonly` for auto-tracking;
+  `gmail.send` only if/when send-from-app is actually built, and prefer
+  starting readonly-only; (c) the OAuth redirect/callback route must
+  validate the `state` parameter (CSRF on the OAuth flow itself — NextAuth
+  handles this for login providers, but a custom Gmail-connect flow would
+  need its own); (d) never log token contents; add the callback route to
+  the middleware matcher exclusions deliberately, not accidentally; (e)
+  the email classifier will feed *email text* (fully attacker-controlled,
+  anyone can email the user) into an LLM — the prompt-fencing module built
+  this session should wrap ALL email content from day one, and
+  status-downgrade confirmations (already decided) are also the right
+  backstop against a malicious email steering the tracker; (f) login/signup
+  rate limiting (see auth review above) becomes non-theoretical once a
+  Gmail-connected app holds OAuth tokens worth stealing.

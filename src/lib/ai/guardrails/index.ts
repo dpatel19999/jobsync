@@ -9,6 +9,7 @@ export {
   GERMAN_WRITING_TELL_RULES,
   detectGermanB1Violations,
 } from "./region-language";
+export { PROMPT_FENCING_RULES, fenceUntrustedContent } from "./prompt-fencing";
 export {
   verifyFactualAccuracy,
   type FactualSourceFacts,

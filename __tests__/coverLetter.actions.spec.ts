@@ -47,12 +47,14 @@ const {
   preprocessJobMock,
   generateVerifiedContentMock,
   detectAtsLanguageMock,
+  checkRateLimitMock,
 } = vi.hoisted(() => ({
   getModelMock: vi.fn(),
   preprocessResumeMock: vi.fn(),
   preprocessJobMock: vi.fn(),
   generateVerifiedContentMock: vi.fn(),
   detectAtsLanguageMock: vi.fn(),
+  checkRateLimitMock: vi.fn(),
 }));
 vi.mock("@/lib/ai", () => ({
   getModel: getModelMock,
@@ -64,6 +66,7 @@ vi.mock("@/lib/ai", () => ({
   buildColdEmailPromptDe: (_resume: string, _job: string, company: string) => `DE_PROMPT:${company}`,
   generateVerifiedContent: generateVerifiedContentMock,
   detectAtsLanguage: detectAtsLanguageMock,
+  checkRateLimit: checkRateLimitMock,
 }));
 
 describe("coverLetterActions", () => {
@@ -409,6 +412,7 @@ describe("coverLetterActions", () => {
       (prisma.userSettings.findUnique as any).mockResolvedValue(null);
       getModelMock.mockResolvedValue({ modelId: "mock-model" });
       detectAtsLanguageMock.mockReturnValue("en");
+      checkRateLimitMock.mockReturnValue({ allowed: true, remaining: 4, resetIn: 60000 });
       generateVerifiedContentMock.mockResolvedValue({
         content: "Generated email body.",
         verified: true,
@@ -435,6 +439,14 @@ describe("coverLetterActions", () => {
       (getJobDetails as any).mockResolvedValue({ success: false, job: null });
       const result = await generateColdEmail("profile-1", "job-1");
       expect(result.success).toBe(false);
+    });
+
+    it("rejects with a clear message when the user is rate limited, without calling the model", async () => {
+      checkRateLimitMock.mockReturnValue({ allowed: false, remaining: 0, resetIn: 42000 });
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/too many ai requests/i);
+      expect(generateVerifiedContentMock).not.toHaveBeenCalled();
     });
 
     it("fails cleanly when no resume can be resolved at all (job/user/profile all empty)", async () => {

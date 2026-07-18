@@ -4,6 +4,8 @@
  * matching. Output is parsed as one keyword per line, so format matters.
  */
 
+import { PROMPT_FENCING_RULES } from "@/lib/ai/guardrails/prompt-fencing";
+
 export const ATS_KEYWORDS_SYSTEM_PROMPT = `You extract ATS (applicant tracking system) keywords from a job description: the concrete skills, technologies, tools, certifications, and named requirements a resume would need to match against.
 
 ## WHAT TO EXTRACT
@@ -16,6 +18,8 @@ export const ATS_KEYWORDS_SYSTEM_PROMPT = `You extract ATS (applicant tracking s
 - Generic filler ("team player", "fast-paced environment", "passionate")
 - Company name, benefits, salary, location, application instructions
 - Anything not actually present in or directly implied by the text given
+
+${PROMPT_FENCING_RULES}
 
 ## OUTPUT FORMAT (FOLLOW EXACTLY)
 One keyword or short keyword phrase per line. No numbering, no bullets, no markdown, no headers, no blank lines, no commentary before or after. 10-25 keywords, ordered roughly by importance. Each line 1-4 words.`;

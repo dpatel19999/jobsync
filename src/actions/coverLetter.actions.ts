@@ -13,6 +13,7 @@ import {
   buildColdEmailPromptDe,
   generateVerifiedContent,
   detectAtsLanguage,
+  checkRateLimit,
 } from "@/lib/ai";
 import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
@@ -181,6 +182,15 @@ export const generateColdEmail = async (
     const user = await getCurrentUser();
     if (!user) {
       throw new Error("Not authenticated");
+    }
+
+    // Same limiter the AI API routes use — the generate button triggers slow
+    // (30s+) local Ollama calls, so rapid duplicate clicks would stack them.
+    const rateLimit = checkRateLimit(user.id);
+    if (!rateLimit.allowed) {
+      throw new Error(
+        `Too many AI requests. Please wait ${Math.ceil(rateLimit.resetIn / 1000)} seconds and try again.`
+      );
     }
 
     const profile = await prisma.profile.findFirst({

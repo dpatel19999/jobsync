@@ -1,23 +1,47 @@
 # MEMORY.md — Session Handoff
 
 ## Last updated
-Worked autonomously through a combined 2-phase task, then a queued
-test-hardening task, all while the user was away. All work is DONE and
-verified.
-**Phase 1 (natural-writing + factual-accuracy guardrails) is done, committed,
-and merged to `main`.** **Phase 2 (DIN 5008 + German B1 region/language
-logic) plus a full test-coverage/edge-case-hardening pass are both done and
-verified, sitting together, uncommitted, on `feature/region-language`**,
-branched from the updated `main`. A queued task asked for the test-hardening
-work on a new `feature/test-hardening` branch "based on whatever's latest
-once prior work is merged," but Phase 2 was explicitly told to stay
-uncommitted for review — merging it just to satisfy the branch-naming
-instruction would have broken that hold, so the test work was added
-directly onto `feature/region-language` instead (flagged in DECISIONS.md,
-not silently decided). **Stop and report back for review before committing
-any of this.** Several things are flagged for review rather than decided
-silently (all ship as-is, all are safe failure modes, none is a blocker) —
-see "Open items not yet decided."
+**Security hardening pass done on `feature/security-hardening`, UNCOMMITTED,
+awaiting review** (explicit instruction: do not commit/merge/push). All
+earlier work (guardrails, region/language, test hardening) is committed and
+merged to `main` — user reviewed and approved those merges, and all four
+older feature branches were deleted at the user's request. `main` is 7
+commits ahead of `origin/main`, never pushed (no request to).
+
+Security pass summary (details in DECISIONS.md — six new entries — and
+ARCHITECTURE.md's "Security hardening" section):
+1. **Secrets audit (all 567 commits)**: clean, except one inherited,
+   already-removed hardcoded AUTH_SECRET default from the upstream
+   project's Docker files — not in any current file, and confirmed (boolean
+   check only, value never printed) the user's local `.env` does NOT use
+   it. `.env`/`dev.db` gitignored, never committed.
+2. **npm audit**: 14 → 6 via non-breaking `npm audit fix` (all high DoS
+   fixes in ws/engine.io chain applied). Remaining 6 need semver-major:
+   promptfoo dev-eval chain (4 high, dev-only, only "fix" is a downgrade)
+   and Next's bundled postcss (moderate, next already at latest patch) —
+   flagged, not forced.
+3. **Auth review**: NextAuth v5 defaults verified sound (CSRF, httpOnly);
+   session expiry made explicit (jwt/30d, no behavior change). Flagged for
+   later, not fixed: no login/signup rate limiting, weak 6-char password
+   minimum, user-enumeration timing side channel in authorize().
+4. **Rate limiting**: existing checkRateLimit (5/min/user) now also guards
+   generateColdEmail, extractJobKeywords, analyzeDiscoveredJob (the three
+   Ollama-calling actions that had none; API routes already had it).
+5. **Prompt-injection fencing**: new guardrails/prompt-fencing.ts wraps
+   resume/JD text in UNTRUSTED_DATA markers across all three generation
+   prompts; embedded-marker stripping prevents fence escape. Chosen over
+   pattern-stripping "sanitization" (corrupts real content, easily
+   bypassed).
+6. **Gmail-phase security prep flagged** in DECISIONS.md: encrypt OAuth
+   tokens via the existing ApiKey pattern, minimal scopes
+   (readonly-first), OAuth state validation, fence all email content fed
+   to the classifier (attacker-controlled input!), login rate limiting
+   becomes real once tokens worth stealing exist.
+
+Verification: typecheck clean (only pre-existing lucide/date-fns noise),
+dev server boots and serves signin (200) with auth redirect working (307),
+affected specs + new prompt-fencing.spec.ts all pass (42/42), full suite
+re-run in progress at session end — check results before committing.
 
 Previously: both `feature/cold-email` and `feature/ats-scoring` committed and
 merged into `main` (fast-forward, no conflicts either time). Post-merge smoke
@@ -292,24 +316,24 @@ scoring all verified working on `main` itself.
      commit — per explicit instruction for this task.
 
 ## Immediate next steps (in order)
-1. `main` is 6 commits ahead of `origin/main` (Phase 1 merged), still never
-   pushed — no request to push yet. `feature/region-language` sits on top of
-   that, one commit's worth of work, **not yet committed or merged**.
-2. **User needs to review Phase 2 before anything else happens to it**: the
-   two flagged-for-review items (fact-checker false positives from Phase 1,
-   Konjunktiv II leakage + fresh-detection-vs-persisted-field from Phase 2 —
-   see DECISIONS.md) and the actual generated German cold-email sample in
-   this file's item 8. Currently on branch `feature/region-language` with
-   everything built and verified but sitting uncommitted in the working
-   tree — do not commit until the user says so (explicit instruction for
-   this phase specifically, unlike Phase 1 which was pre-approved to commit
-   and merge on its own).
+1. **User needs to review the security-hardening pass** sitting uncommitted
+   on `feature/security-hardening` (see "Last updated" at top) — commit +
+   merge only after approval. Also confirm the full-suite background run
+   that was still finishing at session end came back clean (expected:
+   1275+13-ish passing, with only the known AddJob.spec.tsx
+   parallel-load flakiness).
+2. `main` is 7 commits ahead of `origin/main`, never pushed — no request to
+   push yet. All four earlier feature branches deleted (user-approved);
+   only `main` + `feature/security-hardening` exist locally.
 3. **Feature order (user-specified):**
-   1. ✅ Natural-writing + guardrail pass — done, committed, merged to `main`.
-   2. ✅ Region/language logic (DIN 5008 + German B1) — done, verified,
-      **awaiting review/commit approval** on `feature/region-language`.
-   3. Gmail integration — auto-tracking with confirm-on-downgrade, last. Not
-      started.
+   1. ✅ Natural-writing + guardrail pass — merged to `main`.
+   2. ✅ Region/language logic (DIN 5008 + German B1) + test hardening —
+      merged to `main`.
+   3. (inserted) Security hardening — done, **awaiting review** on
+      `feature/security-hardening`.
+   4. Gmail integration — auto-tracking with confirm-on-downgrade, next
+      after security review. Not started. Read DECISIONS.md's
+      "Gmail-integration security prep" entry before designing it.
 
 ## Full feature list agreed (see ARCHITECTURE.md for technical detail)
 Gmail auto-tracking (with confirm-on-downgrade), EN+DE ATS scoring ✅ done,

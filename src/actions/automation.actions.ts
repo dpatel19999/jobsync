@@ -26,6 +26,7 @@ import {
   buildJobMatchPrompt,
   preprocessResume,
   preprocessJob,
+  checkRateLimit,
 } from "@/lib/ai";
 import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails } from "@/actions/job.actions";
@@ -678,6 +679,16 @@ export async function analyzeDiscoveredJob(jobId: string): Promise<{
         success: false,
         message:
           "A run is in progress for this automation. Please wait until it completes before analyzing jobs.",
+      };
+    }
+
+    // Same limiter the AI API routes use — this button triggers a slow local
+    // Ollama call, so rapid duplicate clicks would stack them.
+    const rateLimit = checkRateLimit(user.id);
+    if (!rateLimit.allowed) {
+      return {
+        success: false,
+        message: `Too many AI requests. Please wait ${Math.ceil(rateLimit.resetIn / 1000)} seconds and try again.`,
       };
     }
 

@@ -16,6 +16,13 @@ export const authConfig = {
     error: "/signin",
   },
   secret: process.env.AUTH_SECRET,
+  // Explicit rather than implicit framework default: JWT sessions expire
+  // after 30 days. Acceptable for a fully-local single-user app; revisit if
+  // this ever gets deployed anywhere reachable by others.
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60,
+  },
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;

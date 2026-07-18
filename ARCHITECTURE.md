@@ -194,6 +194,37 @@ human review," not "block/discard," which keeps this failure mode safe
 through silently) but it does mean warnings should be read as "worth a
 second look," not "definitely wrong."
 
+## Security hardening (done, branch `feature/security-hardening`)
+
+Scope: secrets audit, dependency vulnerabilities, auth review, rate
+limiting, prompt-injection fencing. Full findings/rationale in DECISIONS.md
+(six entries); summary of code changes:
+- `src/lib/ai/guardrails/prompt-fencing.ts` (new) — `fenceUntrustedContent()`
+  wraps resume/JD text in `<<<UNTRUSTED_DATA>>>` markers (embedded markers
+  stripped so input can't escape its fence); `PROMPT_FENCING_RULES` added to
+  all three generation system prompts (cold email EN/DE, ATS keywords).
+  Fourth guardrails file, exported via the same barrel.
+- Rate limiting: the existing `checkRateLimit` (5 req/min/user, in-memory)
+  now also guards `generateColdEmail`, `extractJobKeywords`, and
+  `analyzeDiscoveredJob` — previously only the streaming API routes had it,
+  leaving the slow (30–130s) Ollama-backed action buttons stackable via
+  rapid clicks. `scoreJob` exempt (no model call).
+- `auth.config.ts`: session strategy/expiry made explicit (`jwt`, 30 days —
+  was already the implicit default, no behavior change).
+- `npm audit fix` (non-breaking only): 14 → 6 vulnerabilities. The
+  remaining 6 need semver-major changes and are documented/flagged in
+  DECISIONS.md (promptfoo dev-tool chain + Next's bundled postcss), not
+  forced.
+- New `__tests__/prompt-fencing.spec.ts`; rate-limit rejection tests added
+  to `coverLetter.actions.spec.ts` / `atsScore.actions.spec.ts`.
+- Secrets audit across all 567 commits: clean except one inherited,
+  already-removed hardcoded AUTH_SECRET default from upstream Docker files
+  (details + why no rotation needed in DECISIONS.md). `.env`/`dev.db`
+  properly ignored, never committed.
+- Gmail-phase security prep flagged in DECISIONS.md (OAuth token
+  encryption via the ApiKey pattern, minimal scopes, state validation,
+  fencing email content, login rate limiting).
+
 ## Region/language module (done, branch `feature/region-language`)
 
 Extends the writing guardrails module rather than duplicating it — new file

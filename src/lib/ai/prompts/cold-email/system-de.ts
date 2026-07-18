@@ -11,6 +11,7 @@ import {
   GERMAN_B1_LANGUAGE_RULES,
   GERMAN_WRITING_TELL_RULES,
 } from "@/lib/ai/guardrails/region-language";
+import { PROMPT_FENCING_RULES } from "@/lib/ai/guardrails/prompt-fencing";
 
 export const COLD_EMAIL_SYSTEM_PROMPT_DE = `You are helping a job seeker write a short cold email (in German) to a hiring manager or recruiter at a specific company, based strictly on their real resume/profile data and a specific job description.
 
@@ -28,5 +29,7 @@ ${DIN_5008_EMAIL_STRUCTURE}
 ${GERMAN_B1_LANGUAGE_RULES}
 
 ${GERMAN_WRITING_TELL_RULES}
+
+${PROMPT_FENCING_RULES}
 
 Write the entire email in German. Output ONLY the email text (subject line through signature). Do not wrap it in quotes or code fences.`;

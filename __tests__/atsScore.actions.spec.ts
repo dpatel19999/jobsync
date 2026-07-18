@@ -35,10 +35,12 @@ const {
   getModelMock,
   preprocessResumeMock,
   preprocessJobMock,
+  checkRateLimitMock,
 } = vi.hoisted(() => ({
   getModelMock: vi.fn(),
   preprocessResumeMock: vi.fn(),
   preprocessJobMock: vi.fn(),
+  checkRateLimitMock: vi.fn(),
 }));
 vi.mock("@/lib/ai", () => ({
   getModel: getModelMock,
@@ -46,6 +48,7 @@ vi.mock("@/lib/ai", () => ({
   preprocessJob: preprocessJobMock,
   ATS_KEYWORDS_SYSTEM_PROMPT: "ATS_SYSTEM",
   buildAtsKeywordsPrompt: (jobText: string) => `ATS_PROMPT:${jobText.length}`,
+  checkRateLimit: checkRateLimitMock,
 }));
 
 const VALID_USER = { id: "user-1", name: "Test", email: "test@test.com" };
@@ -56,12 +59,21 @@ describe("extractJobKeywords — edge cases", () => {
     (getCurrentUser as any).mockResolvedValue(VALID_USER);
     (prisma.userSettings.findUnique as any).mockResolvedValue(null);
     getModelMock.mockResolvedValue({ modelId: "mock-model" });
+    checkRateLimitMock.mockReturnValue({ allowed: true, remaining: 4, resetIn: 60000 });
   });
 
   it("fails cleanly when the job is not found", async () => {
     (getJobDetails as any).mockResolvedValue({ success: false, job: null });
     const result = await extractJobKeywords("job-1");
     expect(result.success).toBe(false);
+  });
+
+  it("rejects with a clear message when the user is rate limited, without calling the model", async () => {
+    checkRateLimitMock.mockReturnValue({ allowed: false, remaining: 0, resetIn: 42000 });
+    const result = await extractJobKeywords("job-1");
+    expect(result.success).toBe(false);
+    expect(result.message).toMatch(/too many ai requests/i);
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it("fails cleanly when the job description is too minimal to preprocess", async () => {

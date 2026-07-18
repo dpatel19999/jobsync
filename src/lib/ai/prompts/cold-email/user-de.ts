@@ -4,6 +4,8 @@
  * branch inside the same function) so the English path stays untouched.
  */
 
+import { fenceUntrustedContent } from "@/lib/ai/guardrails/prompt-fencing";
+
 export function buildColdEmailPromptDe(
   resumeText: string,
   jobText: string,
@@ -12,10 +14,10 @@ export function buildColdEmailPromptDe(
   return `Write a short cold email in German to a hiring contact at ${companyName} for the role described below, based on this candidate's real resume.
 
 RESUME:
-${resumeText}
+${fenceUntrustedContent(resumeText)}
 
 JOB DESCRIPTION:
-${jobText}
+${fenceUntrustedContent(jobText)}
 
 Output only the email text (Betreff line, salutation, body, closing, signature), in German, mentioning ${companyName} by name and one concrete detail from the job description. Use only facts present in the resume above.`;
 }

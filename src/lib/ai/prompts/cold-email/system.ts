@@ -4,6 +4,7 @@
  */
 
 import { AI_WRITING_TELL_RULES } from "@/lib/ai/guardrails/writing-tells";
+import { PROMPT_FENCING_RULES } from "@/lib/ai/guardrails/prompt-fencing";
 
 export const COLD_EMAIL_SYSTEM_PROMPT = `You are helping a job seeker write a short cold email to a hiring manager or recruiter at a specific company, based strictly on their real resume/profile data and a specific job description.
 
@@ -20,5 +21,7 @@ Name the company by name at least once. Reference one concrete detail from the j
 Brief greeting, one sentence on why this company/role specifically, one or two sentences connecting real background to the role's concrete needs, a simple call to action (e.g. asking to connect or share a resume), brief sign-off with the candidate's name from the resume contact info.
 
 ${AI_WRITING_TELL_RULES}
+
+${PROMPT_FENCING_RULES}
 
 Output ONLY the email body text. Do not wrap it in quotes, code fences, or add a subject line.`;
