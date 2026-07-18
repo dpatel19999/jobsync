@@ -14,6 +14,8 @@ export {
   buildJobMatchPrompt,
   AUTOMATION_JOB_MATCH_SYSTEM_PROMPT,
   buildAutomationJobMatchPrompt,
+  COLD_EMAIL_SYSTEM_PROMPT,
+  buildColdEmailPrompt,
 } from "./prompts";
 
 // Analysis tools

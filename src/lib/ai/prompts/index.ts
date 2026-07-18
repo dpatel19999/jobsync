@@ -30,3 +30,9 @@ export {
   RESUME_IMPORT_SYSTEM_PROMPT,
   buildResumeImportPrompt,
 } from "./resume-import";
+
+// Cold Email exports
+export {
+  COLD_EMAIL_SYSTEM_PROMPT,
+  buildColdEmailPrompt,
+} from "./cold-email";

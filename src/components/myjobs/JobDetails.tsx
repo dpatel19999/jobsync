@@ -57,6 +57,7 @@ import { DeleteAlertDialog } from "../DeleteAlertDialog";
 import { AddJob } from "./AddJob";
 import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toast } from "../ui/use-toast";
+import { GenerateColdEmailButton } from "./GenerateColdEmailButton";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -185,6 +186,10 @@ function JobDetails({
               Match with AI
             </span>
           </Button>
+          <GenerateColdEmailButton
+            jobId={job.id}
+            existingContent={job.ColdEmail?.content}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
