@@ -3,6 +3,18 @@ import prisma from "@/lib/db";
 import { handleError } from "@/lib/utils";
 import { getCurrentUser } from "@/utils/user.utils";
 import { APP_CONSTANTS } from "@/lib/constants";
+import { generateText } from "ai";
+import {
+  getModel,
+  preprocessResume,
+  preprocessJob,
+  COLD_EMAIL_SYSTEM_PROMPT,
+  buildColdEmailPrompt,
+} from "@/lib/ai";
+import { TEMPERATURES } from "@/lib/ai/config";
+import { getResumeById } from "@/actions/profile.actions";
+import { getJobDetails } from "@/actions/job.actions";
+import { defaultUserSettings } from "@/models/userSettings.model";
 
 export const getCoverLetterList = async (
   page: number = 1,
@@ -149,6 +161,117 @@ export const deleteCoverLetterById = async (
     return { success: true };
   } catch (error) {
     const msg = "Failed to delete cover letter.";
+    return handleError(error, msg);
+  }
+};
+
+// Generates a short cold email for a specific job, from the same resume/profile
+// data the cover letter flow uses, then saves it as a ColdEmail linked to the job.
+// Mirrors automation.actions.ts's analyzeDiscoveredJob for the AI-calling
+// convention (getModel + generateText, non-streaming server action).
+export const generateColdEmail = async (
+  profileId: string,
+  jobId: string
+): Promise<any | undefined> => {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    const profile = await prisma.profile.findFirst({
+      where: { id: profileId, userId: user.id },
+    });
+    if (!profile) {
+      throw new Error("Profile not found");
+    }
+
+    const { job, success: jobSuccess } = await getJobDetails(jobId);
+    if (!jobSuccess || !job) {
+      throw new Error("Job not found");
+    }
+
+    const userRow = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { defaultResumeId: true },
+    });
+
+    let resumeId: string | null =
+      job.resumeId ?? userRow?.defaultResumeId ?? null;
+
+    if (!resumeId) {
+      const fallbackResume = await prisma.resume.findFirst({
+        where: { profileId },
+        orderBy: { createdAt: "desc" },
+      });
+      resumeId = fallbackResume?.id ?? null;
+    }
+
+    if (!resumeId) {
+      throw new Error(
+        "No resume found to generate a cold email from. Attach a resume to this job or add one to your profile first."
+      );
+    }
+
+    const { data: resume, success: resumeSuccess } = await getResumeById(
+      resumeId
+    );
+    if (!resumeSuccess || !resume) {
+      throw new Error("Resume not found");
+    }
+
+    const [resumePre, jobPre] = await Promise.all([
+      preprocessResume(resume),
+      preprocessJob(job),
+    ]);
+
+    if (!resumePre.success) {
+      throw new Error(resumePre.error.message);
+    }
+    if (!jobPre.success) {
+      throw new Error(jobPre.error.message);
+    }
+
+    const userSettings = await prisma.userSettings.findUnique({
+      where: { userId: user.id },
+    });
+    const ai = userSettings
+      ? {
+          ...defaultUserSettings.ai,
+          ...(JSON.parse(userSettings.settings).ai ?? {}),
+        }
+      : defaultUserSettings.ai;
+
+    const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
+
+    const companyName = job.Company?.label ?? "the company";
+
+    const result = await generateText({
+      model,
+      system: COLD_EMAIL_SYSTEM_PROMPT,
+      prompt: buildColdEmailPrompt(
+        resumePre.data.normalizedText,
+        jobPre.data.normalizedText,
+        companyName
+      ),
+      temperature: TEMPERATURES.FEEDBACK,
+    });
+
+    const content = result.text.trim();
+    const title = `${companyName} - ${job.JobTitle?.label ?? "Cold Email"}`;
+
+    const coldEmail = await prisma.coldEmail.create({
+      data: { profileId, title, content },
+    });
+
+    await prisma.job.update({
+      where: { id: jobId, userId: user.id },
+      data: { coldEmailId: coldEmail.id },
+    });
+
+    return { success: true, data: coldEmail, content };
+  } catch (error) {
+    const msg = "Failed to generate cold email.";
     return handleError(error, msg);
   }
 };

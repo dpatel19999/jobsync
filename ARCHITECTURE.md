@@ -4,9 +4,14 @@
 - `src/actions/job.actions.ts` — application CRUD, `JobStatus` is a data table (not
   a fixed enum), so custom statuses (Phone Screen, Technical Round, Final Round,
   Ghosted) are just rows, no code change needed.
-- `src/actions/coverLetter.actions.ts` — AI cover letter generation via `getModel()`
-  / `generateText()` (from the `ai` SDK). Cold email generation will be a sibling
-  function here, same pattern.
+- `src/actions/coverLetter.actions.ts` — pure manual CRUD (title/content typed
+  into a Tiptap editor); **no AI generation lives here**, contrary to this
+  file's earlier assumption. The real AI-calling convention is in
+  `automation.actions.ts`'s `analyzeDiscoveredJob` (non-streaming `getModel()` +
+  `generateText()`) and in `src/app/api/ai/resume/match/route.ts` (streaming,
+  client-picked model). `generateColdEmail` (done — see MEMORY.md) lives in
+  `coverLetter.actions.ts` as a sibling to the CRUD functions, but borrows its
+  AI-calling shape from `automation.actions.ts`.
 - `src/actions/resumeImport.actions.ts`, `profile.actions.ts` — Resume/CoverLetter
   models under a `Profile`, resumes have structured `ResumeSection`s already.
 - `src/actions/atsCompany.actions.ts` — NOTE: this "ATS" means Greenhouse/Lever job
@@ -25,7 +30,7 @@
 | Gmail auto-tracking | `src/lib/gmail/client.ts`, `classifier.ts`, `src/actions/gmail.actions.ts`, `GmailAccount` prisma model | Calls existing `job.actions.ts` to update status |
 | ATS keyword scoring (EN) | `src/lib/ats/scorer.ts`, `src/actions/atsScore.actions.ts`, add `atsScoreBefore/After` to `Job` model | Runs alongside existing `automation.actions.ts` match flow |
 | ATS keyword scoring (DE) | `src/lib/ats/scorer-de.ts` — compound-noun decomposition + stemming, separate from EN scorer | Same as above, different algorithm |
-| Cold email | New function in existing `coverLetter.actions.ts`, `ColdEmail` prisma model (mirrors `CoverLetter`) | Reuses cover letter's AI pattern |
+| Cold email ✅ done | `generateColdEmail` in existing `coverLetter.actions.ts`, `ColdEmail` prisma model (mirrors `CoverLetter`), `src/lib/ai/prompts/cold-email/`, `GenerateColdEmailButton.tsx` | Reuses `automation.actions.ts`'s AI-calling pattern |
 | Natural-writing + guardrail pass | New shared prompt layer in `src/lib/ai/`, applied to all three generation functions above | Prompt-layer only, no new UI |
 | Recruiter-persona scoring | `src/lib/review/persona-score.ts` — weighted rubric from persona doc (Technical Fit 25%, Experience 20%, Cultural Fit 20%, Communication 15%, Motivation 10%, Availability 10%) | Runs after generation, before showing user the draft |
 | Interview prep | `src/actions/interviewPrep.actions.ts`, new `PrepQuestion` model | New UI page, links to `Job` |

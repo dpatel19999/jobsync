@@ -129,6 +129,16 @@ export const getResumeList = async (
   }
 };
 
+export const getCurrentProfileId = async (): Promise<string | null> => {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const profile = await prisma.profile.findFirst({
+    where: { userId: user.id },
+    select: { id: true },
+  });
+  return profile?.id ?? null;
+};
+
 export const getDefaultResumeId = async (): Promise<string | null> => {
   const user = await getCurrentUser();
   if (!user) return null;

@@ -71,6 +71,7 @@ model Profile {
   user         User          @relation(fields: [userId], references: [id])
   resumes      Resume[]
   coverLetters CoverLetter[]
+  coldEmails   ColdEmail[]
 }
 
 model Resume {
@@ -91,6 +92,17 @@ model Resume {
 }
 
 model CoverLetter {
+  id        String   @id @default(uuid())
+  profileId String
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profile   Profile  @relation(fields: [profileId], references: [id])
+  Job       Job[]
+}
+
+model ColdEmail {
   id        String   @id @default(uuid())
   profileId String
   title     String
@@ -310,6 +322,8 @@ model Job {
   resumeId      String?
   CoverLetter   CoverLetter? @relation(fields: [coverLetterId], references: [id])
   coverLetterId String?
+  ColdEmail     ColdEmail?   @relation(fields: [coldEmailId], references: [id])
+  coldEmailId   String?
   Notes         Note[]
   tags        Tag[]
 

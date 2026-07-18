@@ -137,6 +137,18 @@ export interface CoverLetter {
   };
 }
 
+export interface ColdEmail {
+  id?: string;
+  profileId?: string;
+  title: string;
+  content: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+  _count?: {
+    Job?: number;
+  };
+}
+
 export type ProfileDocumentType = "resume" | "cover-letter";
 
 export interface ProfileDocument {

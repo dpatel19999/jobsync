@@ -53,3 +53,16 @@ Format: Decision — Rationale
   MEMORY.md) inspired by the "How Senior Engineers Actually Build With AI in 2026"
   methodology (JavaScript Mastery) — reduces re-explaining context every session,
   and gives an explicit signal for when to start a fresh chat.
+
+- **Cold email generation mirrors the `analyzeDiscoveredJob` AI-calling pattern
+  from `automation.actions.ts`** (getModel + non-streaming generateText), not
+  `coverLetter.actions.ts` — ARCHITECTURE.md's assumption that cover letters had
+  AI generation was wrong; that file turned out to be pure manual CRUD (Tiptap
+  editor, no model call). `generateColdEmail` still lives in
+  `coverLetter.actions.ts` as instructed (sibling to the cover letter CRUD), it
+  just borrows its AI-calling convention from automation.actions.ts instead.
+
+- **`OLLAMA_BASE_URL` fixed from `host.docker.internal` to `127.0.0.1`** in
+  `.env` — the checked-in default assumed Docker, but CLAUDE.md's stack rule is
+  native npm/Prisma with no Docker for local dev, so the Docker-only hostname
+  never resolved.
