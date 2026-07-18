@@ -66,6 +66,24 @@ export const SCORE_VARIANCE = {
   EXTREME: 7,
 } as const;
 
+/**
+ * Truncates resume/job text to the provider-appropriate limit before it goes
+ * into a prompt. TEXT_LIMITS existed but was never actually wired into any
+ * prompt-building call site (confirmed via a repo-wide search) — long
+ * inputs were being sent to the model in full, uncapped. Used by cold-email
+ * and ATS keyword extraction; scoreJob doesn't call a model so it doesn't
+ * need this.
+ */
+export function truncateForProvider(
+  text: string,
+  provider: string,
+  kind: "RESUME" | "JOB",
+): string {
+  const limits = provider === "ollama" ? TEXT_LIMITS.OLLAMA : TEXT_LIMITS.CLOUD;
+  const maxChars = limits[kind];
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
 // Legacy exports for backward compatibility
 export const SEMANTIC_TIMEOUT_MS = TIMEOUTS.SEMANTIC_MS;
 export const AGENT_TIMEOUT_MS = TIMEOUTS.AGENT_MS;

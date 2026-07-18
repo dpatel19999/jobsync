@@ -713,7 +713,6 @@ describe("jobActions", () => {
         JobSource: true,
         JobTitle: true,
         Company: true,
-        CoverLetter: true,
         Status: true,
         Location: true,
         Resume: {
@@ -721,6 +720,9 @@ describe("jobActions", () => {
             File: true,
           },
         },
+        CoverLetter: true,
+        ColdEmail: true,
+        Keywords: true,
         tags: true,
       },
     });

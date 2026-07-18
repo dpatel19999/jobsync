@@ -221,6 +221,30 @@ describe("extractMetadata", () => {
     expect(result.lineCount).toBe(1);
     expect(result.hasContactInfo).toBe(false);
   });
+
+  // Regression test for a real ReDoS-shaped bug found while testing "very
+  // long job descriptions": the email regex's [\w.-]+@ backtracks
+  // quadratically against a long run of text with no "@" (confirmed ~6s on
+  // 60,000 chars before the fix). hasContactPatterns now scans only a
+  // bounded prefix, so this must stay fast regardless of input length.
+  it("stays fast on a very long run of text with no contact pattern (ReDoS regression guard)", () => {
+    const text = "A".repeat(200000);
+    const start = Date.now();
+    const result = extractMetadata(text);
+    const elapsed = Date.now() - start;
+    expect(result.hasContactInfo).toBe(false);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it("documents the tradeoff: contact info far past the scan-limit prefix is not detected", () => {
+    // Deliberately encodes the known limitation rather than hiding it —
+    // if this starts failing because someone raised the scan window, that's
+    // fine; if it fails because the cap silently vanished, that's the bug
+    // this regression guard exists to catch.
+    const text = "A".repeat(5000) + " email@example.com";
+    const result = extractMetadata(text);
+    expect(result.hasContactInfo).toBe(false);
+  });
 });
 
 describe("validateText", () => {

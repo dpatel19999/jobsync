@@ -16,6 +16,8 @@ export {
   buildAutomationJobMatchPrompt,
   COLD_EMAIL_SYSTEM_PROMPT,
   buildColdEmailPrompt,
+  COLD_EMAIL_SYSTEM_PROMPT_DE,
+  buildColdEmailPromptDe,
   ATS_KEYWORDS_SYSTEM_PROMPT,
   buildAtsKeywordsPrompt,
 } from "./prompts";
@@ -29,11 +31,19 @@ export {
   detectWritingTells,
   verifyFactualAccuracy,
   generateVerifiedContent,
+  DIN_5008_EMAIL_STRUCTURE,
+  GERMAN_B1_LANGUAGE_RULES,
+  GERMAN_WRITING_TELL_RULES,
+  detectGermanB1Violations,
   type FactualSourceFacts,
   type FactualCheckResult,
   type GenerateVerifiedContentArgs,
   type GenerateVerifiedContentResult,
 } from "./guardrails";
+
+// Region/language detection (reused from the ATS module's EN/DE detector —
+// see DECISIONS.md for why this phase reuses it instead of a persisted field)
+export { detectAtsLanguage, type AtsLanguage } from "@/lib/ats";
 
 // Resume preprocessing
 export {

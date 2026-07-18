@@ -156,3 +156,133 @@ Format: Decision — Rationale
   Future options if it does: swap the verifier model, require 2/2 agreement
   across two independent fact-check calls before warning, or let the user
   dismiss/suppress a specific flagged claim.
+
+- **German cold-email language selection reuses ATS scoring's fresh
+  `detectAtsLanguage` (franc-min) instead of building the planned persisted
+  `Job.region`/`language` field now** — the fresh-detection approach already
+  exists, is tested, and needs no schema migration. Deliberately reusing it
+  by direct import (`@/lib/ai` re-exports `detectAtsLanguage`/`AtsLanguage`
+  from `@/lib/ats`) rather than writing a second detector. **FLAGGED FOR
+  REVIEW**: this is a real gap, not just a shortcut — a German company can
+  post an English-language job description and still want a German cold
+  email (or vice versa), and JD-text detection will guess wrong in that
+  case. Didn't build the persisted field this session because it needs a UX
+  decision only the user should make (per-job override? per-profile
+  default? does it also change ATS scoring's behavior?) rather than being
+  guessed at mid-autonomous-run. Revisit when there's a concrete case of the
+  detection guessing wrong, or when the CV-tailoring phase needs a firmer
+  language selector anyway.
+
+- **DIN 5008 applied to cold email covers only the plain-text email
+  conventions (Betreff line, salutation/closing formulas, paragraph
+  structure), not DIN 5008's postal-letter page-layout rules** (margins,
+  address window, page count) — those apply to a printed/attached
+  Anschreiben, and cold email is plain email body text with no page. Cover
+  letters (where page-layout rules would actually matter) are still pure
+  manual CRUD with no AI generation, so there's nothing to apply DIN's
+  layout rules to yet — this waits for cover-letter AI generation to exist.
+
+- **`AI_WRITING_TELL_RULES` (English) is extended, not replaced, for German
+  output** (`GERMAN_WRITING_TELL_RULES` = the same constant plus
+  German-specific additions) — the underlying anti-patterns (rule-of-three
+  stacking, formal-transition overuse, inflated closers) are largely
+  language-agnostic in concept even though their exact trigger phrases
+  differ per language, so duplicating the whole list per language would
+  just be copy-paste drift waiting to happen.
+
+- **FLAGGED FOR REVIEW: the local `llama3.1` model does not reliably follow
+  the "no Konjunktiv II" instruction for German B1 output** — confirmed via
+  direct testing: a real generated cold email used `würde`/`könnten` three
+  times despite an explicit ban in the system prompt. Same category of
+  issue as the factual-accuracy false-positive limitation above (a small
+  local model not perfectly following an instruction) but here the failure
+  direction is the opposite — under-enforcement of a stylistic rule rather
+  than over-flagging a factual one. Mitigated the same way: a soft,
+  non-blocking `detectGermanB1Violations` heuristic check now runs inside
+  `generateVerifiedContent` for the German path and logs a warning, so the
+  gap is at least visible rather than silent. Not escalated to a hard
+  regenerate-on-violation gate (matching the Phase 1 decision to keep
+  natural-writing/style constraints soft, not hard) — revisit if B1
+  violations prove frequent enough in real usage to warrant blocking.
+
+- **Test-hardening pass done on `feature/region-language` itself, not a
+  separate `feature/test-hardening` branch** — a queued task asked for a new
+  branch "based on whatever's latest once prior work is merged," but Phase 2
+  was explicitly instructed to stay uncommitted pending review. Merging it
+  just to satisfy the new task's branch-naming instruction would have broken
+  that explicit hold. Flagged rather than guessed: kept everything on
+  `feature/region-language`, still uncommitted, so the user reviews one
+  consistent diff instead of two branches with overlapping/duplicated code.
+
+- **`jsdom` installed as a devDependency** — `vitest.config.ts` already
+  declared `environment: "jsdom"`, but the package was never actually
+  installed, so the entire test suite failed to start at all (confirmed:
+  zero test files existed in the repo before this session, and running
+  vitest with zero tests errored with `Cannot find package 'jsdom'`). This
+  is the missing half of an already-checked-in config, not a new tooling
+  choice.
+
+- **`TEXT_LIMITS` (already defined in `src/lib/ai/config.ts`, provider-aware
+  resume/job character caps) wired into cold email and ATS keyword
+  extraction via a new `truncateForProvider()` helper** — a repo-wide search
+  confirmed `TEXT_LIMITS` was never referenced anywhere before this session,
+  meaning long resumes/job descriptions were going into prompts completely
+  uncapped. Fixed only within this session's three assigned features
+  (cold email, ATS extraction); deliberately left job-match/resume-review/
+  automation-match untouched since wiring those in too is a broader,
+  unscoped change (touches prompt builders outside cold-email/ATS/
+  guardrails) — flagged here rather than silently expanded to more files.
+
+- **FLAGGED FOR REVIEW / FIXED: `hasContactPatterns` (in
+  `src/lib/ai/tools/text-processing.ts`, shared by resume and job
+  preprocessing) had a real ReDoS-shaped performance bug** — its email regex
+  (`[\w.-]+@[\w.-]+\.\w+`) backtracks quadratically against long text with no
+  `@` character. Confirmed directly: 60,000 characters of plain text took
+  ~6.2 seconds in `extractMetadata` alone, and this runs on every resume/job
+  *before* length validation even happens, blocking Node's single-threaded
+  event loop for the whole request. Fixed by scanning only a bounded prefix
+  (2,000 chars — contact info is always in a document's header) rather than
+  rewriting the regex itself, since that's the smaller, more obviously-safe
+  change. A regression test locks in that a 200,000-character run of
+  contact-free text stays under 1 second. Found while testing the "very long
+  job descriptions" edge case specifically requested for this pass — exactly
+  the kind of thing that edge case was meant to surface.
+
+- **Fixed two real bugs in `detectWritingTells`'s regexes while writing its
+  test suite** (not just test-writing mistakes — the detector itself was
+  wrong): the "not just X, it's Y" check only matched literal "not just",
+  missing the equally-common contraction "isn't just X, it's Y" that
+  CLAUDE.md's own ban-list wording explicitly calls out; and the
+  rule-of-three adjective-stack check's suffix list (`-ing`/`-ive`/`-ed`)
+  didn't match CLAUDE.md's own canonical example
+  ("innovative, scalable, and robust" — "scalable" doesn't end in any of
+  those). Replaced the suffix-matching approach with a case-sensitive
+  three-lowercase-words-joined-by-comma-and pattern, which catches the
+  canonical example while still avoiding false-positives on genuine
+  capitalized tech lists ("Node.js, PostgreSQL, and AWS").
+
+- **New test files moved from colocated `src/**/*.test.ts` to
+  `__tests__/*.spec.ts` after discovering the established convention** —
+  an initial repo scan for existing tests searched `*.test.ts` only and
+  missed the ~78 pre-existing `__tests__/*.spec.ts` files entirely. Once
+  found, all newly-written tests were relocated/rewritten to match: flat
+  `__tests__/` directory, `@/` alias imports, `vi.mock("@prisma/client",
+  ...)` for DB mocking (not `vi.mock("@/lib/db", ...)`), and the plain
+  `vi.mock("ai", () => ({ generateText: vi.fn() }))` style (not
+  `vi.hoisted`) already used by `ats-runner.spec.ts`/`greenhouse-
+  runner.spec.ts`. `generateColdEmail`'s new tests were merged into the
+  existing `__tests__/coverLetter.actions.spec.ts` rather than left in a
+  separate file, since that file already covers the rest of the same
+  action module. Two tests that would have duplicated existing
+  `__tests__/text-processing.spec.ts` coverage were merged into that file
+  instead of kept as a second, competing spec file.
+
+- **`AddJob.spec.tsx`'s two form-submission tests are flaky under
+  full-suite parallel load, not a regression from this session** —
+  confirmed: both time out at the default 5000ms only when running all 97
+  spec files together (CPU contention across worker processes), but pass
+  reliably (17/17) when run in isolation. Not modified — the timeout is a
+  pre-existing tight bound on a component test unrelated to any file this
+  session touched, and patching it (e.g. raising the timeout) would mask
+  environmental flakiness rather than fix a real bug. Flagged here in case
+  it becomes a recurring CI annoyance as the suite continues to grow.

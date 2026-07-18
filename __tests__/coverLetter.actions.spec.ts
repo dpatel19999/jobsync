@@ -3,8 +3,11 @@ import {
   createCoverLetter,
   updateCoverLetter,
   deleteCoverLetterById,
+  generateColdEmail,
 } from "@/actions/coverLetter.actions";
 import { getCurrentUser } from "@/utils/user.utils";
+import { getJobDetails } from "@/actions/job.actions";
+import { getResumeById } from "@/actions/profile.actions";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -23,12 +26,44 @@ vi.mock("@prisma/client", () => {
       findFirst: vi.fn(),
       create: vi.fn(),
     },
+    user: { findUnique: vi.fn() },
+    resume: { findFirst: vi.fn() },
+    userSettings: { findUnique: vi.fn() },
+    coldEmail: { create: vi.fn() },
+    job: { update: vi.fn() },
   };
   return { PrismaClient: vi.fn(function() { return mPrismaClient; }) };
 });
 
 vi.mock("@/utils/user.utils", () => ({
   getCurrentUser: vi.fn(),
+}));
+vi.mock("@/actions/job.actions", () => ({ getJobDetails: vi.fn() }));
+vi.mock("@/actions/profile.actions", () => ({ getResumeById: vi.fn() }));
+
+const {
+  getModelMock,
+  preprocessResumeMock,
+  preprocessJobMock,
+  generateVerifiedContentMock,
+  detectAtsLanguageMock,
+} = vi.hoisted(() => ({
+  getModelMock: vi.fn(),
+  preprocessResumeMock: vi.fn(),
+  preprocessJobMock: vi.fn(),
+  generateVerifiedContentMock: vi.fn(),
+  detectAtsLanguageMock: vi.fn(),
+}));
+vi.mock("@/lib/ai", () => ({
+  getModel: getModelMock,
+  preprocessResume: preprocessResumeMock,
+  preprocessJob: preprocessJobMock,
+  COLD_EMAIL_SYSTEM_PROMPT: "EN_SYSTEM",
+  buildColdEmailPrompt: (_resume: string, _job: string, company: string) => `EN_PROMPT:${company}`,
+  COLD_EMAIL_SYSTEM_PROMPT_DE: "DE_SYSTEM",
+  buildColdEmailPromptDe: (_resume: string, _job: string, company: string) => `DE_PROMPT:${company}`,
+  generateVerifiedContent: generateVerifiedContentMock,
+  detectAtsLanguage: detectAtsLanguageMock,
 }));
 
 describe("coverLetterActions", () => {
@@ -345,6 +380,173 @@ describe("coverLetterActions", () => {
         success: false,
         message: "Database error",
       });
+    });
+  });
+
+  describe("generateColdEmail — edge cases", () => {
+    function setupHappyPath() {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma.profile.findFirst as any).mockResolvedValue({ id: "profile-1", userId: "user-id" });
+      (getJobDetails as any).mockResolvedValue({
+        success: true,
+        job: {
+          id: "job-1",
+          resumeId: null,
+          Company: { label: "Nordwind" },
+          JobTitle: { label: "Backend Engineer" },
+        },
+      });
+      (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: "resume-1" });
+      (getResumeById as any).mockResolvedValue({ success: true, data: { id: "resume-1", title: "My Resume" } });
+      preprocessResumeMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "Resume text with Node.js experience." },
+      });
+      preprocessJobMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "Job text for Backend Engineer role." },
+      });
+      (prisma.userSettings.findUnique as any).mockResolvedValue(null);
+      getModelMock.mockResolvedValue({ modelId: "mock-model" });
+      detectAtsLanguageMock.mockReturnValue("en");
+      generateVerifiedContentMock.mockResolvedValue({
+        content: "Generated email body.",
+        verified: true,
+        unsupportedClaims: [],
+        attempts: 1,
+        warning: null,
+      });
+      (prisma.coldEmail.create as any).mockResolvedValue({ id: "email-1", content: "Generated email body." });
+      (prisma.job.update as any).mockResolvedValue({});
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      setupHappyPath();
+    });
+
+    it("succeeds on the happy path", async () => {
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.content).toBe("Generated email body.");
+    });
+
+    it("fails cleanly when the job is not found", async () => {
+      (getJobDetails as any).mockResolvedValue({ success: false, job: null });
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(false);
+    });
+
+    it("fails cleanly when no resume can be resolved at all (job/user/profile all empty)", async () => {
+      (getJobDetails as any).mockResolvedValue({
+        success: true,
+        job: { id: "job-1", resumeId: null, Company: { label: "Nordwind" }, JobTitle: { label: "BE" } },
+      });
+      (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: null });
+      (prisma.resume.findFirst as any).mockResolvedValue(null); // no fallback resume in profile either
+
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/no resume/i);
+      expect(generateVerifiedContentMock).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the most recent profile resume when job and user default are both empty", async () => {
+      (getJobDetails as any).mockResolvedValue({
+        success: true,
+        job: { id: "job-1", resumeId: null, Company: { label: "Nordwind" }, JobTitle: { label: "BE" } },
+      });
+      (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: null });
+      (prisma.resume.findFirst as any).mockResolvedValue({ id: "fallback-resume" });
+
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(getResumeById).toHaveBeenCalledWith("fallback-resume");
+    });
+
+    it("fails cleanly when the resume text is too short/minimal to pass preprocessing", async () => {
+      preprocessResumeMock.mockResolvedValue({
+        success: false,
+        error: { code: "TOO_SHORT", message: "Resume is too short. Found 12 characters, minimum required: 200 characters." },
+      });
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/too short/i);
+      expect(generateVerifiedContentMock).not.toHaveBeenCalled();
+    });
+
+    it("routes to the German prompt pair when detectAtsLanguage returns 'de'", async () => {
+      detectAtsLanguageMock.mockReturnValue("de");
+      await generateColdEmail("profile-1", "job-1");
+
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      expect(callArgs.system).toBe("DE_SYSTEM");
+      expect(callArgs.prompt).toContain("DE_PROMPT");
+      expect(callArgs.language).toBe("de");
+    });
+
+    it("routes to the English prompt pair when detectAtsLanguage returns 'en'", async () => {
+      detectAtsLanguageMock.mockReturnValue("en");
+      await generateColdEmail("profile-1", "job-1");
+
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      expect(callArgs.system).toBe("EN_SYSTEM");
+      expect(callArgs.prompt).toContain("EN_PROMPT");
+      expect(callArgs.language).toBe("en");
+    });
+
+    it("truncates very long resume/job text before handing it to generateVerifiedContent (Ollama provider)", async () => {
+      preprocessResumeMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "R".repeat(5000) },
+      });
+      preprocessJobMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "J".repeat(5000) },
+      });
+      (prisma.userSettings.findUnique as any).mockResolvedValue({
+        settings: JSON.stringify({ ai: { provider: "ollama", model: "llama3.1" } }),
+      });
+
+      await generateColdEmail("profile-1", "job-1");
+
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      // TEXT_LIMITS.OLLAMA.RESUME/JOB are 1500/1200 — both inputs are 5000
+      // chars, so both must have been truncated well below that.
+      expect(callArgs.facts.resumeText.length).toBeLessThan(2000);
+      expect(callArgs.facts.jobText.length).toBeLessThan(2000);
+    });
+
+    it("surfaces the warning from generateVerifiedContent to the caller without discarding content", async () => {
+      generateVerifiedContentMock.mockResolvedValue({
+        content: "Flagged content.",
+        verified: false,
+        unsupportedClaims: ["fake claim"],
+        attempts: 2,
+        warning: "Please review before sending.",
+      });
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.content).toBe("Flagged content.");
+      expect(result.warning).toBe("Please review before sending.");
+    });
+
+    it("handles two rapid duplicate calls without throwing, each producing its own ColdEmail row", async () => {
+      let createCount = 0;
+      (prisma.coldEmail.create as any).mockImplementation(async () => {
+        createCount += 1;
+        return { id: `email-${createCount}`, content: "Generated email body." };
+      });
+
+      const [r1, r2] = await Promise.all([
+        generateColdEmail("profile-1", "job-1"),
+        generateColdEmail("profile-1", "job-1"),
+      ]);
+
+      expect(r1.success).toBe(true);
+      expect(r2.success).toBe(true);
+      expect(prisma.coldEmail.create).toHaveBeenCalledTimes(2);
+      expect(prisma.job.update).toHaveBeenCalledTimes(2);
     });
   });
 });

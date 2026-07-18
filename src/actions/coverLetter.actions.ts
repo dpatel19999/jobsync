@@ -9,9 +9,12 @@ import {
   preprocessJob,
   COLD_EMAIL_SYSTEM_PROMPT,
   buildColdEmailPrompt,
+  COLD_EMAIL_SYSTEM_PROMPT_DE,
+  buildColdEmailPromptDe,
   generateVerifiedContent,
+  detectAtsLanguage,
 } from "@/lib/ai";
-import { TEMPERATURES } from "@/lib/ai/config";
+import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails } from "@/actions/job.actions";
 import { defaultUserSettings } from "@/models/userSettings.model";
@@ -247,19 +250,30 @@ export const generateColdEmail = async (
 
     const companyName = job.Company?.label ?? "the company";
 
+    // Fresh EN/DE detection from the job description text, reusing the ATS
+    // module's detector rather than a persisted Job.region/language field
+    // (see DECISIONS.md — deferred pending a UX decision on a user-facing
+    // language override).
+    const language = detectAtsLanguage(jobPre.data.normalizedText);
+
+    // TEXT_LIMITS existed but was never wired in anywhere — long resumes/JDs
+    // were going to the model uncapped. Truncate here, provider-aware.
+    const resumeText = truncateForProvider(resumePre.data.normalizedText, ai.provider, "RESUME");
+    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
+
     const { content, warning } = await generateVerifiedContent({
       model,
-      system: COLD_EMAIL_SYSTEM_PROMPT,
-      prompt: buildColdEmailPrompt(
-        resumePre.data.normalizedText,
-        jobPre.data.normalizedText,
-        companyName
-      ),
+      system: language === "de" ? COLD_EMAIL_SYSTEM_PROMPT_DE : COLD_EMAIL_SYSTEM_PROMPT,
+      prompt:
+        language === "de"
+          ? buildColdEmailPromptDe(resumeText, jobText, companyName)
+          : buildColdEmailPrompt(resumeText, jobText, companyName),
       temperature: TEMPERATURES.FEEDBACK,
       facts: {
-        resumeText: resumePre.data.normalizedText,
-        jobText: jobPre.data.normalizedText,
+        resumeText,
+        jobText,
       },
+      language,
     });
 
     const title = `${companyName} - ${job.JobTitle?.label ?? "Cold Email"}`;

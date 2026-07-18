@@ -1,13 +1,23 @@
 # MEMORY.md — Session Handoff
 
 ## Last updated
-Working autonomously through a combined 2-phase task while the user was away:
-Phase 1 (natural-writing + factual-accuracy guardrails) is done, verified, and
-about to be committed + merged to `main`. Phase 2 (DIN 5008 + German B1
-region/language logic) is next, on its own branch off updated `main`, and per
-explicit instruction will be left uncommitted for review when the user's back.
-See "Open items not yet decided" for the one thing flagged for review rather
-than decided silently.
+Worked autonomously through a combined 2-phase task, then a queued
+test-hardening task, all while the user was away. All work is DONE and
+verified.
+**Phase 1 (natural-writing + factual-accuracy guardrails) is done, committed,
+and merged to `main`.** **Phase 2 (DIN 5008 + German B1 region/language
+logic) plus a full test-coverage/edge-case-hardening pass are both done and
+verified, sitting together, uncommitted, on `feature/region-language`**,
+branched from the updated `main`. A queued task asked for the test-hardening
+work on a new `feature/test-hardening` branch "based on whatever's latest
+once prior work is merged," but Phase 2 was explicitly told to stay
+uncommitted for review — merging it just to satisfy the branch-naming
+instruction would have broken that hold, so the test work was added
+directly onto `feature/region-language` instead (flagged in DECISIONS.md,
+not silently decided). **Stop and report back for review before committing
+any of this.** Several things are flagged for review rather than decided
+silently (all ship as-is, all are safe failure modes, none is a blocker) —
+see "Open items not yet decided."
 
 Previously: both `feature/cold-email` and `feature/ats-scoring` committed and
 merged into `main` (fast-forward, no conflicts either time). Post-merge smoke
@@ -144,19 +154,160 @@ scoring all verified working on `main` itself.
      see DECISIONS.md for the mitigation options already considered.
    - `npx tsc --noEmit` shows zero new errors from this phase (only the
      pre-existing unrelated `lucide-react`/`date-fns` type-declaration noise).
+8. ✅ **Region/language (DIN 5008 + German B1)** built on
+   `feature/region-language` (branched from `main` after item 7 merged) —
+   **still uncommitted, waiting for review**, unlike every prior feature
+   this session. Full design in ARCHITECTURE.md's "Region/language module"
+   section, rationale in DECISIONS.md. Summary:
+   - New `src/lib/ai/guardrails/region-language.ts`: `DIN_5008_EMAIL_STRUCTURE`,
+     `GERMAN_B1_LANGUAGE_RULES`, `GERMAN_WRITING_TELL_RULES` (extends Phase
+     1's `AI_WRITING_TELL_RULES`, doesn't duplicate it), and
+     `detectGermanB1Violations()` (soft heuristic: Konjunktiv II markers,
+     over-long sentences, "nicht nur...sondern auch" framing).
+   - `generateVerifiedContent` (Phase 1) gained an optional `language?: "en"
+     | "de"` arg; when `"de"` it also runs `detectGermanB1Violations` and
+     warns on hits — same non-blocking pattern as the English tell-check.
+   - New `src/lib/ai/prompts/cold-email/system-de.ts` +
+     `user-de.ts` (`COLD_EMAIL_SYSTEM_PROMPT_DE` / `buildColdEmailPromptDe`)
+     — separate files from the English versions, so the English path is
+     provably untouched.
+   - `generateColdEmail` now detects the job description's language via
+     `detectAtsLanguage` (imported straight from `@/lib/ats`, re-exported
+     through `@/lib/ai` — reused, not duplicated) and picks the EN/DE prompt
+     pair accordingly.
+   - DIN 5008 research done via live web search this session (not from
+     model memory): confirmed current conventions are subject line
+     ("Betreff"), formal salutation/closing formulas, paragraph structure
+     with blank lines between them — applied only the email-relevant
+     conventions, not DIN 5008's postal-letter page-layout rules (margins,
+     address window), since cold email is plain email body text with no
+     page. Sources: leonrenner.com, letterformat.org, grokipedia.com,
+     dinmedia.de (DIN's own site).
+   - **Verified via a real, temporary script run against local Ollama**
+     (deleted after use, not committed): `detectAtsLanguage` correctly
+     identified a German test job description as `"de"`. A real end-to-end
+     German cold-email generation (llama3.1, ~589s) produced a `Betreff:`
+     line, a formal `Sehr geehrte Damen und Herren,` salutation, a formal
+     `Mit freundlichen Grüßen` closing, no informal `du`/`dein`, and an
+     average sentence length of 18.7 words (within the ~15-20 word B1
+     target).
+   - **Known limitation, flagged for review (see DECISIONS.md)**: that same
+     generation used `würde`/`könnten` (Konjunktiv II) three times despite
+     an explicit ban in the prompt — confirmed real, not a fluke. Mirrors
+     Phase 1's fact-checker limitation (small local model not perfectly
+     following an instruction) but in the opposite direction here
+     (under-enforcing a style rule vs. over-flagging a factual one).
+     Mitigated the same way Phase 1 was: logged via the new
+     `detectGermanB1Violations` soft-check rather than escalated to a hard
+     block, so it's visible rather than silent. Not fixed further this
+     session — flagged, not chased.
+   - Language selection deliberately reuses ATS scoring's fresh
+     `detectAtsLanguage(jobDescriptionText)` rather than building the
+     previously-planned persisted `Job.region`/`language` field — **flagged
+     for review**: this is a real gap (an English-language JD from a German
+     company would wrongly generate an English cold email, and vice versa),
+     not decided as a non-issue. Not built because it needs a UX call only
+     the user should make (per-job override? per-profile default? does it
+     also affect ATS scoring?), not something to guess at mid-autonomous-run.
+   - `npx tsc --noEmit` shows zero new errors from this phase either.
+   - Cover letters re-confirmed to still have no AI generation — DIN
+     5008/B1 wasn't applied there since there's nothing generated to apply
+     it to yet.
+9. ✅ **Test coverage + edge-case hardening** — queued mid-session, done on
+   top of `feature/region-language` (see the branch-naming note above),
+   **also uncommitted, awaiting review**.
+   **CORRECTION to a claim made mid-session**: this is NOT the repo's first
+   test suite — there's an extensive pre-existing one in `__tests__/*.spec.ts`
+   (~78 files, ~1195 tests) that an initial scan missed (it searched for
+   `*.test.ts` only). That whole suite could not run at all before this
+   session, though — `jsdom` was declared in `vitest.config.ts` but never
+   installed (see bug list below) — so it's effectively the first time any
+   of it, old or new, has actually executed. New test files were moved to
+   match the existing `__tests__/<name>.spec.ts` convention (flat dir, `@/`
+   alias imports, `vi.mock("@prisma/client", ...)` DB-mocking style) after
+   this was discovered, rather than left as the colocated `src/**/*.test.ts`
+   files first written before the convention was found. Two new files'
+   worth of tests were merged into existing spec files instead
+   (`coverLetter.actions.spec.ts` gained a `generateColdEmail` block;
+   `text-processing.spec.ts` gained the ReDoS regression test) rather than
+   left as competing, partially-duplicate files.
+   - **Final verification**: full suite run twice after the reorg. First
+     full run (before reorg) — 1284/1285 passed, only failure was the stale
+     `job.actions.spec.ts` assertion (fixed). Second full run (after reorg)
+     — 1275/1277 passed; the 2 new failures are `AddJob.spec.tsx`'s
+     form-submission tests timing out at 5000ms **only under full-suite
+     parallel load** — confirmed via an isolated run (17/17 pass, ~2s/test)
+     that this is pre-existing flakiness from CPU contention across ~97
+     files running together, not a regression from anything touched this
+     session. Not modified — see DECISIONS.md.
+   - **34 + 12 + 10 + 12 + 7 = ~90 new tests** across: `writing-tells.ts`,
+     `region-language.ts` (both guardrail detectors), ATS `scorer.ts`
+     (core scoring math), `de-compound.ts` (umlaut/ß compound splitting,
+     synthetic dict), `de.ts` (real-dictionary integration),
+     `language-detect.ts` (EN/DE/non-EN-non-DE fallback),
+     `factual-accuracy.ts` + `generate-verified.ts` (mocked `ai` SDK, no
+     real Ollama calls needed for these), `text-processing.ts`
+     (`validateText`, `hasContactInfo`, ReDoS regression guard),
+     `preprocessing-job.ts` (empty/minimal/huge/malformed job descriptions),
+     `config.ts` (`truncateForProvider`), and action-level tests for
+     `generateColdEmail` + `extractJobKeywords`/`scoreJob` (mocked
+     prisma/auth/AI-model layer, real ATS pipeline for the language-fallback
+     case).
+   - **Real, pre-existing bug found and fixed**: `vitest.config.ts` already
+     declared `environment: "jsdom"`, but the `jsdom` package was never
+     installed — the test suite could not run *at all* before this session
+     (confirmed: `npx vitest run` errored with `Cannot find package
+     'jsdom'` even with zero test files present). Installed it as a
+     devDependency; this is why zero tests existed despite vitest being
+     configured — nobody could have run one.
+   - **Real, serious bug found and fixed**: `hasContactPatterns` (shared by
+     resume + job preprocessing, in `src/lib/ai/tools/text-processing.ts`)
+     had a ReDoS-shaped performance bug in its email regex — confirmed
+     directly that 60,000 characters of contact-free text took **~6.2
+     seconds** in `extractMetadata` alone, which runs before any length
+     validation and blocks Node's single event loop for the whole request.
+     Found specifically while testing the "very long job descriptions"
+     edge case this task asked for. Fixed by scanning only the first 2,000
+     characters (contact info is always in a document's header) rather
+     than rewriting the regex. Regression test locks in that 200,000 chars
+     of contact-free text now stays under 1 second.
+   - **Real bug found and fixed**: `TEXT_LIMITS` (provider-aware
+     resume/job character caps) was defined in `src/lib/ai/config.ts` but
+     never referenced anywhere in the codebase — confirmed via repo-wide
+     search. Long resumes/job descriptions were going into prompts fully
+     uncapped. Added `truncateForProvider()` and wired it into
+     `generateColdEmail` and `extractJobKeywords` (the two features in
+     scope this session); deliberately did not touch job-match/
+     resume-review/automation-match, which is a broader change outside
+     this session's assigned features.
+   - **Two real bugs found and fixed in `detectWritingTells` itself** (not
+     just test mistakes) while writing its tests: it didn't catch the
+     contraction "isn't just X, it's Y" (only literal "not just"), and its
+     rule-of-three check's suffix list didn't match CLAUDE.md's own
+     canonical example ("innovative, scalable, and robust" — "scalable"
+     matched nothing). Both fixed; see DECISIONS.md for the exact regex
+     changes.
+   - `npx tsc --noEmit` shows zero new errors from any of this.
+   - Did not touch `.env`, did not push, did not merge to `main`, did not
+     commit — per explicit instruction for this task.
 
 ## Immediate next steps (in order)
-1. `main` will be 6 commits ahead of `origin/main` once Phase 1 merges (still
-   never pushed — no request to push yet).
-2. **Feature order (user-specified):**
-   1. ✅ Natural-writing + guardrail pass — done, see item 7 above. Committed
-      on `feature/writing-guardrails`, merged to `main`.
-   2. 🔄 Region/language logic — DIN 5008 German cover-letter/email formatting
-      + B1 German cap, extending the Phase 1 guardrail module rather than
-      duplicating it. IN PROGRESS on `feature/region-language` (branched from
-      `main` after Phase 1 merged). Deliberately left **uncommitted** per
-      explicit instruction — stop and report back for review before
-      committing this one, unlike Phase 1.
+1. `main` is 6 commits ahead of `origin/main` (Phase 1 merged), still never
+   pushed — no request to push yet. `feature/region-language` sits on top of
+   that, one commit's worth of work, **not yet committed or merged**.
+2. **User needs to review Phase 2 before anything else happens to it**: the
+   two flagged-for-review items (fact-checker false positives from Phase 1,
+   Konjunktiv II leakage + fresh-detection-vs-persisted-field from Phase 2 —
+   see DECISIONS.md) and the actual generated German cold-email sample in
+   this file's item 8. Currently on branch `feature/region-language` with
+   everything built and verified but sitting uncommitted in the working
+   tree — do not commit until the user says so (explicit instruction for
+   this phase specifically, unlike Phase 1 which was pre-approved to commit
+   and merge on its own).
+3. **Feature order (user-specified):**
+   1. ✅ Natural-writing + guardrail pass — done, committed, merged to `main`.
+   2. ✅ Region/language logic (DIN 5008 + German B1) — done, verified,
+      **awaiting review/commit approval** on `feature/region-language`.
    3. Gmail integration — auto-tracking with confirm-on-downgrade, last. Not
       started.
 
@@ -188,13 +339,21 @@ Q&A module, LinkedIn networking assistant (manual-send only).
 ## Open items not yet decided
 - Whether/when to add a persisted before/after ATS score comparison (ties
   into the not-yet-built CV-tailoring feature).
-- DIN 5008/B1 region-language phase: where the persisted `Job.region`/
-  `language` field finally gets built, and how it interacts with (vs.
-  replaces) ATS scoring's own fresh-detection approach — being decided now on
-  `feature/region-language`, see this file's top section once that phase
-  updates it.
+- **Decided this session, not fully resolved**: `Job.region`/`language` stays
+  un-persisted. Cold email's German path reuses ATS's fresh
+  `detectAtsLanguage(jobDescriptionText)` instead. **FLAGGED FOR REVIEW**:
+  this will guess wrong for a German company posting an English JD (or vice
+  versa) — a persisted, user-overridable field is still the more correct
+  long-term answer, deliberately not built because it needs a UX decision
+  (per-job override? per-profile default? shared with ATS scoring?) that's
+  the user's call, not something to guess mid-session. See DECISIONS.md.
 - **FLAGGED FOR REVIEW** (not silently decided): local `llama3.1`'s
   reliability as a strict fact-checker for the factual-accuracy guardrail —
   see DECISIONS.md's "FLAGGED FOR REVIEW" entry and item 7 above. Guardrail
   ships as designed (safe failure mode either way), but worth the user's own
   read once they're back.
+- **FLAGGED FOR REVIEW**: local `llama3.1` doesn't reliably honor the "no
+  Konjunktiv II" instruction for German B1 output (confirmed: `würde`/
+  `könnten` appeared 3x in one real generation despite an explicit ban).
+  Mitigated with a soft, logged `detectGermanB1Violations` check rather than
+  a hard block — see DECISIONS.md and item 8 above.

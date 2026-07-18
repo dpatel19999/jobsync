@@ -10,7 +10,7 @@ import {
   ATS_KEYWORDS_SYSTEM_PROMPT,
   buildAtsKeywordsPrompt,
 } from "@/lib/ai";
-import { TEMPERATURES } from "@/lib/ai/config";
+import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails } from "@/actions/job.actions";
 import { defaultUserSettings } from "@/models/userSettings.model";
@@ -76,10 +76,12 @@ export const extractJobKeywords = async (jobId: string): Promise<any | undefined
 
     const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
 
+    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
+
     const result = await generateText({
       model,
       system: ATS_KEYWORDS_SYSTEM_PROMPT,
-      prompt: buildAtsKeywordsPrompt(jobPre.data.normalizedText),
+      prompt: buildAtsKeywordsPrompt(jobText),
       temperature: TEMPERATURES.ANALYSIS,
     });
 

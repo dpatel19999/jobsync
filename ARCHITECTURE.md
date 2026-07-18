@@ -31,6 +31,7 @@
 | ATS keyword scoring (EN+DE) ✅ done | See "ATS keyword scoring module" section below | `src/actions/atsScore.actions.ts` reuses `automation.actions.ts`'s AI-calling pattern for extraction |
 | Cold email ✅ done | `generateColdEmail` in existing `coverLetter.actions.ts`, `ColdEmail` prisma model (mirrors `CoverLetter`), `src/lib/ai/prompts/cold-email/`, `GenerateColdEmailButton.tsx` | Reuses `automation.actions.ts`'s AI-calling pattern |
 | Natural-writing + guardrail pass ✅ done | See "Writing guardrails module" section below | `coverLetter.actions.ts`'s `generateColdEmail` calls `generateVerifiedContent` instead of `generateText` directly |
+| Region/language (DIN 5008 + German B1) ✅ done | See "Region/language module" section below | Extends the Phase 1 guardrail module; `coverLetter.actions.ts`'s `generateColdEmail` branches EN/DE |
 | Recruiter-persona scoring | `src/lib/review/persona-score.ts` — weighted rubric from persona doc (Technical Fit 25%, Experience 20%, Cultural Fit 20%, Communication 15%, Motivation 10%, Availability 10%) | Runs after generation, before showing user the draft |
 | Interview prep | `src/actions/interviewPrep.actions.ts`, new `PrepQuestion` model | New UI page, links to `Job` |
 | LinkedIn networking assistant | `src/lib/linkedin/finder.ts` (manual-trigger search/draft only, no auto-send) | New UI section, reminder tied to `Job` |
@@ -40,9 +41,16 @@
 - `ColdEmail` (mirrors `CoverLetter`) — ✅ done
 - `JobKeyword`, `Job.atsScore`/`atsScoreData` — ✅ done (see below)
 - `PrepQuestion` (linked to `Job`, round type, question, draft answer)
-- `region` field on `Job` (for DIN formatting / B1 German toggle) — still not
-  built; ATS scoring's language detection is deliberately NOT this field, see
-  below
+- `region`/`language` field on `Job` — **still not built, still deliberately
+  deferred** even now that the DIN-formatting phase has landed. Cold email's
+  EN/DE branch (see "Region/language module" below) reuses the ATS module's
+  fresh per-call language detection instead of a persisted field, same
+  choice ATS scoring made. A persisted, user-overridable field is a real
+  gap (a German company can post an English JD, or vice versa, and
+  detection-from-JD-text would guess wrong) but adding it means a schema
+  migration plus a UX decision on where a user overrides it — flagged for
+  review in DECISIONS.md rather than built without the user's input on the
+  UX question.
 
 ## ATS keyword scoring module (done, branch `feature/ats-scoring`)
 
@@ -80,6 +88,64 @@ neutral=unscored) with add/remove.
 New prompt module: `src/lib/ai/prompts/ats-keywords/` (system + user prompts),
 wired into the `@/lib/ai` and `@/lib/ai/prompts` barrels the same way as
 cold-email's.
+
+## Test suite additions (done, built on top of `feature/region-language`)
+
+Test files added, all following the established `__tests__/<name>.spec.ts`
+convention (see "Test suite additions" note below for how that convention
+was found):
+- `__tests__/writing-tells.spec.ts`, `region-language.spec.ts` — pure
+  detector unit tests for the two guardrail modules.
+- `__tests__/factual-accuracy.spec.ts`, `generate-verified.spec.ts` — mock
+  the `ai` SDK's `generateText`, so these run fast/deterministically with
+  no real Ollama calls needed to test the orchestration logic (regenerate-
+  once-on-failure, warning surfacing, soft-check wiring).
+- `__tests__/scorer.spec.ts`, `de-compound.spec.ts` (synthetic dictionary,
+  umlaut/ß focused), `ats-de-adapter.spec.ts` (integration-style, real
+  `dictionary-de` package), `language-detect.spec.ts` (EN/DE plus the
+  non-EN/non-DE fallback edge case).
+- `__tests__/text-processing.spec.ts` — extended (not duplicated) with a
+  ReDoS regression guard and a documented cap-tradeoff test (see bug list
+  below); the rest of that file's coverage already existed.
+- `__tests__/preprocessing-job.spec.ts`, `ai-config.spec.ts` — job-
+  description edge cases (empty/minimal/huge/malformed) and
+  `truncateForProvider`.
+- `__tests__/coverLetter.actions.spec.ts` — extended (not duplicated) with
+  a `generateColdEmail` describe block covering missing-job/missing-resume/
+  too-short-resume error paths, EN/DE prompt routing, `TEXT_LIMITS`
+  truncation, warning surfacing, and two-concurrent-calls behavior.
+- `__tests__/atsScore.actions.spec.ts` — new file (no prior ATS-scoring
+  tests existed); covers the same category of edge cases for
+  `extractJobKeywords`/`scoreJob`, plus a non-EN/non-DE `scoreJob` test that
+  deliberately does NOT mock `@/lib/ats`, exercising the real scoring
+  pipeline end to end.
+
+Real bugs found and fixed while writing this suite (full rationale in
+DECISIONS.md):
+1. `jsdom` missing devDependency — `vitest.config.ts` declared it as the
+   test environment, but it was never installed, so `npx vitest run` failed
+   outright regardless of which tests existed.
+2. `hasContactPatterns`'s email regex — ReDoS-shaped quadratic backtracking
+   against long text with no `@`; confirmed ~6.2s on 60,000 chars inside
+   `extractMetadata`, which runs before any length validation. Fixed with a
+   bounded 2,000-char prefix scan; regression test added.
+3. `TEXT_LIMITS` dead code — defined, never wired into any prompt builder.
+   Added `truncateForProvider()`, wired into `generateColdEmail` and
+   `extractJobKeywords` only (this session's assigned features).
+4. Two real bugs in `detectWritingTells` itself — missed the "isn't just X"
+   contraction, and the rule-of-three regex didn't match CLAUDE.md's own
+   canonical example.
+5. A stale assertion in the pre-existing `__tests__/job.actions.spec.ts`
+   (expected `getJobDetails`'s `include` shape from before `ColdEmail`/
+   `Keywords` were added in earlier, already-merged sessions) — this only
+   surfaced now because the entire pre-existing suite couldn't run before
+   bug #1 was fixed.
+
+**Known, confirmed-non-regression flakiness**: `__tests__/AddJob.spec.tsx`'s
+two form-submission tests time out at the default 5000ms only when the
+full 97-file suite runs together (CPU contention); they pass reliably
+(17/17) in isolation. Not modified — unrelated to any file this session
+touched, and the timeout is a pre-existing tight bound, not a logic bug.
 
 ## Writing guardrails module (done, branch `feature/writing-guardrails`)
 
@@ -127,3 +193,72 @@ human review," not "block/discard," which keeps this failure mode safe
 (over-flagging costs a manual glance; under-flagging would let a fabrication
 through silently) but it does mean warnings should be read as "worth a
 second look," not "definitely wrong."
+
+## Region/language module (done, branch `feature/region-language`)
+
+Extends the writing guardrails module rather than duplicating it — new file
+`src/lib/ai/guardrails/region-language.ts`:
+- `DIN_5008_EMAIL_STRUCTURE` — prompt fragment: mandatory "Betreff:" subject
+  line as the first line, formal salutation ("Sehr geehrte Damen und
+  Herren," by default, or a named "Sehr geehrte Frau/Herr [Nachname]," if
+  the job description names a contact), blank-line-separated body
+  paragraphs, "Mit freundlichen Grüßen" formal closing, always "Sie" not
+  "du". Based on current DIN 5008 email-correspondence conventions (subject
+  line, salutation/closing formulas, paragraph structure) researched via web
+  search this session — DIN 5008's page-layout rules (margins, address
+  window, A4 page count) don't apply here since cold email is plain email
+  body text, not a printed/attached letter.
+- `GERMAN_B1_LANGUAGE_RULES` — prompt fragment for CLAUDE.md's B1 cap:
+  simple vocabulary, ~15-20 word sentences, no Konjunktiv II, no idioms, no
+  heavy Nominalstil.
+- `GERMAN_WRITING_TELL_RULES` — `AI_WRITING_TELL_RULES` (Phase 1) plus
+  German-specific additions ("nicht nur X, sondern auch Y", stacked German
+  formal transitions, German adjective-triplet stacking) — literally
+  extends the Phase 1 constant rather than a parallel list.
+- `detectGermanB1Violations(text)` — same soft/advisory role as Phase 1's
+  `detectWritingTells`: regex heuristic for Konjunktiv II markers
+  (würde/hätte/wäre/könnte), sentences over ~25 words, and "nicht nur ...
+  sondern auch" framing. Wired into `generateVerifiedContent` (see below) —
+  not a new parallel check path.
+
+`generateVerifiedContent` (Phase 1) gained an optional `language?: "en" |
+"de"` arg; when `"de"`, it also runs `detectGermanB1Violations` and
+`console.warn`s any hits, the same non-blocking pattern as the English
+writing-tell check.
+
+New prompt variants under `src/lib/ai/prompts/cold-email/`: `system-de.ts`
+(`COLD_EMAIL_SYSTEM_PROMPT_DE`, composed from the three fragments above) and
+`user-de.ts` (`buildColdEmailPromptDe`) — separate files/functions rather
+than branching inside the existing `system.ts`/`user.ts`, so the English
+path is untouched.
+
+`generateColdEmail` (`coverLetter.actions.ts`) detects the job description's
+language via `detectAtsLanguage` (reused directly from `src/lib/ats` — see
+DECISIONS.md for why this reuses ATS's fresh-detection instead of a
+persisted field) and picks the EN or DE system/user prompt pair and
+`generateVerifiedContent`'s `language` arg accordingly. Cover letters were
+re-confirmed to still have no AI generation, so this only touches cold
+email for now.
+
+**Verified via a real, temporary script run against local Ollama** (deleted
+after use, not committed): `detectAtsLanguage` correctly identified a German
+job description as `"de"`. A full German cold email generated end-to-end
+included a `Betreff:` line, a formal `Sehr geehrte Damen und Herren,`
+salutation, a formal `Mit freundlichen Grüßen` closing, and no informal
+`du`/`dein` — DIN 5008 structure held up well. Average sentence length was
+18.7 words (within the ~15-20 word B1 target).
+
+**Known limitation (flagged for review, see DECISIONS.md)**: the same
+generation, despite the explicit "no Konjunktiv II" instruction, still used
+`würde`/`könnten` three times. This is a real, reproducible instruction-
+following gap in the local 8B model on a negative style constraint, not a
+one-off — this is exactly why `detectGermanB1Violations` exists as a
+runtime soft-check rather than only a prompt instruction.
+
+CORRECTION to an initial claim made mid-session (see the "Test suite
+additions" section near the top of this file for the accurate version):
+this is NOT the repo's first test suite — an extensive pre-existing suite
+already lives in `__tests__/*.spec.ts` (~78 files, ~1195 tests). An initial
+scan missed it (searched `*.test.ts` only). That whole suite couldn't run
+at all before this session (missing `jsdom`), which is also how a stale
+assertion in `__tests__/job.actions.spec.ts` surfaced and got fixed.

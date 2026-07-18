@@ -65,10 +65,19 @@ export const extractMetadata = (text: string): TextMetadata => {
   };
 };
 
+// Contact info always appears near the top of a resume/job posting, so
+// scanning a bounded prefix is enough — and necessary: emailPattern's
+// [\w.-]+@ against a long run of text with no "@" backtracks quadratically
+// (confirmed: ~6s on a 60,000-char run with no match), which would block
+// the event loop on any sufficiently long paste. The cap keeps worst-case
+// regex time constant regardless of overall document length.
+const CONTACT_SCAN_LIMIT = 2000;
+
 const hasContactPatterns = (text: string): boolean => {
+  const scanText = text.slice(0, CONTACT_SCAN_LIMIT);
   const emailPattern = /[\w.-]+@[\w.-]+\.\w+/;
   const phonePattern = /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/;
-  return emailPattern.test(text) || phonePattern.test(text);
+  return emailPattern.test(scanText) || phonePattern.test(scanText);
 };
 
 // VALIDATION HELPERS

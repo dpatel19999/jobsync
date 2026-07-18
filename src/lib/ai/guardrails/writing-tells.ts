@@ -31,7 +31,9 @@ const EM_DASH = "—";
 export function detectWritingTells(text: string): WritingTellHit[] {
   const hits: WritingTellHit[] = [];
 
-  const notJustMatch = text.match(/not\s+just\s+[^,.;]+,?\s+(it'?s|it\s+is)\s+[^,.;]+/i);
+  const notJustMatch = text.match(
+    /(?:is\s*n['’]?t|is\s+not|not)\s+just\s+[^,.;]+,?\s+(it['’]?s|it\s+is)\s+[^,.;]+/i
+  );
   if (notJustMatch) {
     hits.push({ rule: "not-just-x-its-y", excerpt: notJustMatch[0] });
   }
@@ -46,9 +48,11 @@ export function detectWritingTells(text: string): WritingTellHit[] {
     hits.push({ rule: "formal-transition-opener", excerpt: transitionMatch[0] });
   }
 
-  const ruleOfThreeMatch = text.match(
-    /\b([a-z]+ing|[a-z]+ive|[a-z]+ed)\s*,\s*([a-z]+ing|[a-z]+ive|[a-z]+ed)\s*,?\s*and\s+([a-z]+ing|[a-z]+ive|[a-z]+ed)\b/i
-  );
+  // Three lowercase (not capitalized-proper-noun / product-name-looking)
+  // words joined "X, Y, and Z" — catches both adjective and noun stacking.
+  // Case-sensitive on purpose: a real tech list ("Node.js, PostgreSQL, and
+  // AWS") is capitalized and shouldn't trip this.
+  const ruleOfThreeMatch = text.match(/\b([a-z]{4,}),\s*([a-z]{4,}),?\s+and\s+([a-z]{4,})\b/);
   if (ruleOfThreeMatch) {
     hits.push({ rule: "rule-of-three-adjective-stack", excerpt: ruleOfThreeMatch[0] });
   }

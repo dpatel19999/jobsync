@@ -13,6 +13,7 @@ import {
   type FactualSourceFacts,
 } from "./factual-accuracy";
 import { detectWritingTells } from "./writing-tells";
+import { detectGermanB1Violations } from "./region-language";
 
 export interface GenerateVerifiedContentArgs {
   model: LanguageModel;
@@ -20,6 +21,8 @@ export interface GenerateVerifiedContentArgs {
   prompt: string;
   temperature: number;
   facts: FactualSourceFacts;
+  /** When "de", also runs the German B1/DIN soft-check (see region-language.ts). Defaults to "en". */
+  language?: "en" | "de";
 }
 
 export interface GenerateVerifiedContentResult {
@@ -45,7 +48,7 @@ Regenerate the draft. Use ONLY facts that literally appear in the resume and job
 export async function generateVerifiedContent(
   args: GenerateVerifiedContentArgs
 ): Promise<GenerateVerifiedContentResult> {
-  const { model, system, prompt, temperature, facts } = args;
+  const { model, system, prompt, temperature, facts, language = "en" } = args;
 
   let attempts = 0;
   let currentPrompt = prompt;
@@ -80,6 +83,17 @@ export async function generateVerifiedContent(
         .map((h) => h.rule)
         .join(", ")}`
     );
+  }
+
+  if (language === "de") {
+    const b1Hits = detectGermanB1Violations(content);
+    if (b1Hits.length > 0) {
+      console.warn(
+        `[writing-guardrails] German B1/DIN 5008 soft-check hits (not blocking): ${b1Hits
+          .map((h) => h.rule)
+          .join(", ")}`
+      );
+    }
   }
 
   const warning = check.verified

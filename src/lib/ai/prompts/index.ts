@@ -31,10 +31,12 @@ export {
   buildResumeImportPrompt,
 } from "./resume-import";
 
-// Cold Email exports
+// Cold Email exports (EN + DE)
 export {
   COLD_EMAIL_SYSTEM_PROMPT,
   buildColdEmailPrompt,
+  COLD_EMAIL_SYSTEM_PROMPT_DE,
+  buildColdEmailPromptDe,
 } from "./cold-email";
 
 // ATS Keyword Extraction exports
