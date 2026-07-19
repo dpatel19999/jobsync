@@ -393,9 +393,11 @@ function ResumeContainer({
   );
   const [importMode, setImportMode] = useState(false);
 
-  // AI availability for "Structure with AI" button
+  // AI availability for "Structure with AI" button. Defaults to true (using
+  // defaultModel) so the button works out of the box like every other AI
+  // feature — it must not depend on the user ever having saved AI Settings.
   const [aiModel, setAiModel] = useState<AiModel>(defaultModel);
-  const [aiReady, setAiReady] = useState(false);
+  const [aiReady, setAiReady] = useState(true);
   const [ollamaConnected, setOllamaConnected] = useState<boolean | null>(
     null,
   );
@@ -517,33 +519,35 @@ function ResumeContainer({
     return () => window.removeEventListener("beforeunload", handler);
   }, [pendingCards.length]);
 
-  // Load AI settings for "Structure with AI" button
+  // Load AI settings for "Structure with AI" button. The button is already
+  // enabled via the aiReady/defaultModel default above — this only upgrades
+  // the model if the user has saved an override, and always verifies Ollama
+  // connectivity for whichever model ends up in effect.
   useEffect(() => {
     if (resume.File?.filePath && !importMode) {
       getUserSettings().then((result) => {
+        let model = aiModel;
         if (result.success && result.data?.settings?.ai) {
           const ai = result.data.settings.ai;
-          const model: AiModel = {
+          model = {
             provider: ai.provider || defaultModel.provider,
             model: ai.model,
           };
           setAiModel(model);
-          setAiReady(true);
-          if (model.provider === "ollama") {
-            setOllamaConnected(null);
-            setConnectionError("");
-            checkOllamaConnection(model.provider).then((result) => {
-              setOllamaConnected(result.isConnected);
-              if (!result.isConnected) {
-                setConnectionError(
-                  result.error || "Ollama is not reachable.",
-                );
-              }
-            });
-          }
+        }
+        if (model.provider === "ollama") {
+          setOllamaConnected(null);
+          setConnectionError("");
+          checkOllamaConnection(model.provider).then((result) => {
+            setOllamaConnected(result.isConnected);
+            if (!result.isConnected) {
+              setConnectionError(result.error || "Ollama is not reachable.");
+            }
+          });
         }
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resume.File?.filePath, importMode]);
 
   const handleAcceptCard = useCallback(
