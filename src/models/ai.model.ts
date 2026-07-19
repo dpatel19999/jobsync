@@ -6,6 +6,8 @@ export type {
   JobMatchData,
 } from "./ai.schemas";
 
+import { DEFAULT_OLLAMA_MODEL } from "@/lib/ai/config";
+
 // AI MODEL
 
 export interface AiModel {
@@ -48,5 +50,10 @@ export enum GeminiModel {
 
 export const defaultModel: AiModel = {
   provider: AiProvider.OLLAMA,
-  model: OllamaModel.LLAMA3_1,
+  // Fallback only — used as the initial React state for job-match, resume-
+  // review, and create-resume before the user's saved AI Settings (if any)
+  // load, and never overwritten if they haven't saved a preference yet.
+  // The model picker on the AI Settings page (src/components/settings/
+  // AiSettings.tsx) remains the user's override mechanism, untouched here.
+  model: DEFAULT_OLLAMA_MODEL,
 };
