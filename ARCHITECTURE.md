@@ -665,3 +665,117 @@ never reorder or invent sections.
   prompt alone. Not chased further this pass (see DECISIONS.md) — matches
   this codebase's established practice of one tightening pass, then
   document and revisit only if real usage shows it's too noisy.
+
+## Resume rewrite .docx export (done, branch `feature/resume-rewrite-docx-export`)
+
+Closes the "not built" gap flagged at the end of the previous section — a
+real, downloadable `.docx` at the agreed
+`Dhruvil_Akbari_{CompanyName}_Resume.docx` naming, reconstructing the
+original master template's formatting where that's actually possible.
+
+- **New dependencies** (all previously only transitive, now explicit since
+  this code imports them directly): `jszip` (unzip/rezip a .docx — a .docx
+  is a ZIP archive of XML parts), `@xmldom/xmldom` (parse/serialize
+  `word/document.xml`), `docx` (build a clean document from scratch for the
+  fallback path — a different, complementary problem from editing an
+  existing one).
+- `src/lib/docx/rewrite-docx.ts`:
+  - `buildFormattedDocx(originalDocxBuffer, rewrittenLines)` — the primary,
+    formatting-preserving path, used only when the original master
+    template was itself uploaded as a `.docx`. Unzips the original, parses
+    `word/document.xml`, finds every `<w:p>` paragraph (wherever it occurs
+    — body, table cells, etc.; headers/footers live in separate XML parts
+    and are correctly left untouched, since `extractText()`'s mammoth-based
+    extraction — what the AI actually rewrote from — doesn't cover them
+    either), filters to paragraphs with non-empty text, and requires that
+    count to exactly match `rewrittenLines.length` — otherwise throws
+    `DocxStructureMismatchError` rather than writing into a misaligned
+    paragraph. For each aligned paragraph, only the `<w:t>` text-node
+    content is replaced (new text goes on the first run, later runs in the
+    same paragraph are cleared) — `<w:pPr>`/`<w:rPr>` (paragraph/run
+    formatting: font, bold, size, spacing) are never touched, which is what
+    makes fonts/headers/spacing/layout survive. Re-zips and returns the new
+    file.
+    **Known, flagged limitation**: a paragraph with *mixed* run formatting
+    on one line (e.g. a bold word followed by plain text in the same
+    sentence) collapses onto the first run's formatting for the whole
+    reworded line — there's no general way to know which reworded words
+    should keep which original run's styling, so this takes the simpler,
+    honest option rather than guessing at a word-level mapping. Complex
+    table-heavy layouts are walked the same as body paragraphs but may not
+    line up with how `extractText()` linearized that content, in which case
+    it throws (see fallback below) rather than corrupting the file.
+  - `buildPlainDocx(rewrittenLines)` — fallback, used when the original
+    template wasn't a `.docx`, its paragraph count no longer matches the
+    rewritten line count (e.g. re-uploaded after the rewrite was
+    generated), or the source file is missing from disk. Builds a clean
+    document from scratch with the `docx` package — all-caps lines
+    (matching the real fixture resume's own section-heading convention)
+    get bolded, everything else is plain. **Not visually the original** —
+    this is the honest "best available approach" for a case where 1:1
+    reconstruction genuinely isn't possible (a PDF has no editable
+    paragraph structure to reconstruct into), not a silent approximation.
+- **`RewrittenResume.sourceTemplateId`** (new nullable FK to
+  `MasterTemplate`, migration `20260719205222_add_rewritten_resume_source_
+  template`) — pins the *exact* template version a rewrite was generated
+  from. Without this, downloading later would re-resolve "the current
+  template for this slot," which could have changed (a new version
+  uploaded) since the rewrite was generated — silently misaligning
+  `buildFormattedDocx`'s paragraph mapping. Resolvable indefinitely because
+  `MasterTemplate` rows are never deleted on re-upload (see the master-
+  templates section above).
+- `src/lib/resume-naming.ts` — `buildResumeDocumentName(companyName)`
+  extracted out of `resumeRewrite.actions.ts` (which used it for
+  `RewrittenResume.title`) so the download route's filename can't drift
+  from the saved title; both call the same function now.
+- `src/app/api/resume-rewrite/docx/route.ts` (GET, `?jobId=`) — generates
+  the `.docx` on demand (nothing cached on disk), following the same
+  auth-in-the-route-handler + middleware-protected-by-default pattern as
+  the existing `/api/profile/resume` download route. Resolves
+  `RewrittenResume` + its pinned `sourceTemplate`, sniffs the original
+  file's real type (magic bytes, reusing `sniffFileType` from the resume-
+  import module — not the file extension), and picks `buildFormattedDocx`
+  or `buildPlainDocx` accordingly; a caught `DocxStructureMismatchError`
+  also falls back rather than erroring the whole request. Signals fallback
+  usage to the client via `X-Docx-Formatting-Fallback`/`X-Docx-Fallback-
+  Reason` response headers (URI-encoded) rather than baking it into the
+  binary response body.
+- UI: `RewriteResumeButton.tsx` gained a "Download .docx" button in the
+  dialog footer, enabled once `content` exists (works for a resume rewrite
+  generated in an earlier session too, not just the current one — the
+  route re-reads from the DB by `jobId`). Uses the same
+  fetch→blob→`createObjectURL`→synthetic-`<a download>` pattern already
+  established by `DownloadFileButton.tsx`, reading the suggested filename
+  from a custom `X-Docx-Filename` header (blob URLs don't carry
+  `Content-Disposition` through to the anchor's `download` attribute, so
+  the filename has to be passed explicitly). Shows a non-blocking toast
+  with the fallback reason when the formatting-preserving path wasn't used.
+- **Verified via a real, temporary script**
+  (`scripts/verify-resume-rewrite-docx.ts`, deleted after use): since no
+  real `.docx`-format resume exists in this repo's fixture data (only the
+  PDF used in the earlier plain-text resume-rewrite verification), built a
+  genuinely realistic `.docx` — the real fixture resume's actual German
+  wording/structure (name bold, `AUSBILDUNG`/`BERUFSERFAHRUNG` headers
+  bold), not placeholder text — using the same `docx` package the fallback
+  path uses, which is the honest stand-in given the constraint. Ran the
+  full real pipeline: real mammoth extraction (11 non-empty lines), real
+  Gemini rewrite against the real Goldwind job (`language: "de"`,
+  guardrail pipeline needed one regenerate attempt, then `verified: true`),
+  real `buildFormattedDocx` — **this time the position-lock line count
+  matched exactly (11 vs. 11)**, formatting-preserving path used, not the
+  fallback. Confirmed the output is a structurally valid `.docx` (all
+  three required OOXML parts present), round-tripped it back through the
+  app's own trusted `mammoth.extractRawText()` and confirmed the output
+  contains the exact rewritten German text, and confirmed the name line's
+  bold formatting (`<w:b/>`) survived the rewrite. `__tests__/rewrite-
+  docx.spec.ts` (7 tests) covers the same ground deterministically
+  (formatting preservation, empty-paragraph handling, structure-mismatch
+  error, invalid-file error, plain-fallback validity) plus edge cases not
+  worth spending a real Gemini call on. Fixture rows/files cleaned up
+  after (0 leftover rows confirmed).
+- **Honest ceiling of this verification**: no Word/LibreOffice GUI is
+  available in this environment, so "confirm it opens correctly" is proven
+  by (a) the zip/XML structural checks and (b) round-tripping through this
+  app's own already-trusted extraction pipeline — not by visually opening
+  the file. This is the strongest automated proxy available here, not a
+  claim of pixel-perfect visual confirmation.

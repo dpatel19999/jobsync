@@ -714,3 +714,62 @@ Format: Decision — Rationale
   `MasterTemplate` row and the `RewrittenResume` it produced were created
   and cleaned up; the real job itself was only touched via its
   `rewrittenResumeId` (set, then reset to null), never deleted.
+
+- **`feature/resume-rewrite-docx-export`: text-only `<w:t>`-node editing
+  chosen over a templating library (`docxtemplater`) or rebuilding the
+  document from scratch for every case.** `docxtemplater` requires the
+  source `.docx` to already contain `{tag}`-style placeholders — real
+  uploaded resumes don't, and asking the user to hand-edit their resume to
+  add template tags before uploading would defeat the point of "use your
+  existing resume as-is." Rebuilding from scratch (the `buildPlainDocx`
+  fallback approach) for every case would throw away real formatting that
+  IS recoverable for the common case (a plain-paragraph `.docx`). Direct
+  XML manipulation (unzip via `jszip`, edit `word/document.xml`'s `<w:t>`
+  nodes via `@xmldom/xmldom`, rezip) is the standard technique for this
+  exact problem and doesn't require the source file to be pre-templated.
+- **Formatting preservation is paragraph-level (first-run wins), not
+  word-level** — deliberately, not as an oversight. Detecting which
+  specific reworded words should inherit which specific original run's
+  bold/italic/color when a single sentence originally had mixed formatting
+  is not a solvable general problem without a much more sophisticated
+  diff. Collapsing to the first run's formatting for the whole paragraph is
+  the simpler, predictable, honestly-flagged choice — most resume lines
+  (bullets, single-styled headings) have exactly one run anyway, so this
+  only visibly matters for the less common mixed-formatting-within-one-line
+  case.
+- **DOCX_STRUCTURE_MISMATCH triggers a fallback, not a hard error to the
+  user** — a real, expected scenario (the user re-imports a new template
+  version between generating a rewrite and downloading it, or a resume's
+  table/text-box layout linearizes differently than `extractText()`
+  assumed) shouldn't leave the user with zero output. `buildPlainDocx`
+  guarantees *a* usable file always comes back, with the reason clearly
+  surfaced via response headers → a toast, rather than silently
+  downgrading without saying so.
+- **`RewrittenResume.sourceTemplateId` added specifically to prevent a
+  real correctness bug**: without pinning which exact `MasterTemplate`
+  version a rewrite was generated from, downloading later would resolve
+  "whatever's current now" for that slot — if the user re-imported a new
+  template version in between, `buildFormattedDocx`'s paragraph-count
+  check would either (a) coincidentally still match and silently write
+  rewritten text into the WRONG (newer) template's paragraphs, or (b)
+  mismatch and fall back unnecessarily even though the original alignment
+  was fine. Both are silently-wrong-or-needlessly-degraded outcomes this
+  one extra FK avoids entirely, at negligible cost since `MasterTemplate`
+  rows are already never deleted.
+- **Fallback signaled via response headers (`X-Docx-Formatting-Fallback`/
+  `X-Docx-Fallback-Reason`), not embedded in the file or a separate
+  endpoint** — keeps the binary response a plain, uncomplicated `.docx`
+  byte stream (no risk of a JSON wrapper or multipart response confusing a
+  simple `fetch().blob()` client), while still letting the UI show an
+  honest toast about degraded formatting without a second round-trip.
+- **Verification used a programmatically-built "realistic" `.docx` fixture
+  instead of skipping the formatting-preservation E2E test** — no real
+  `.docx`-format resume exists anywhere in this repo's fixture data (the
+  only real uploaded resume is a PDF, already used for the plain-text
+  resume-rewrite and PDF-fallback-relevant testing). Building one with the
+  real fixture resume's actual German wording and section structure (not
+  lorem-ipsum placeholder text) via the same `docx` package the fallback
+  path already depends on was judged the most honest available substitute
+  — it exercises real run-formatting preservation end to end, which a
+  mocked/unit-only test cannot. Flagged plainly in ARCHITECTURE.md rather
+  than presented as if a real user-uploaded `.docx` was used.

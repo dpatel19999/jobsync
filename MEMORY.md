@@ -4,8 +4,8 @@
 Everything below is **committed and merged into `main`**. No feature
 branches exist right now — only `main`. `main` is ahead of
 `origin/main`, never pushed (no request to). Full suite re-run this session
-after adding position-locked resume rewrite: 108/109 files, 1412/1415 tests
-passing (the 3 failures are `AddJob.spec.tsx`'s known pre-existing
+after adding .docx export for the resume rewrite: 109/110 files, 1421/1422
+tests passing (the 1 failure is `AddJob.spec.tsx`'s known pre-existing
 full-suite-parallel-load flakiness — 17/17 pass in isolation, confirmed
 unrelated to this session's changes, see "Known, accepted flakiness" below).
 
@@ -366,6 +366,39 @@ a past session's account was accurate.
     Full detail in ARCHITECTURE.md's "Position-locked resume rewrite"
     section.
 
+19. **Resume rewrite .docx export** (`feature/resume-rewrite-docx-export`)
+    — closes item #18's "no file output" gap. New dependencies (`jszip`,
+    `@xmldom/xmldom`, `docx`). `src/lib/docx/rewrite-docx.ts`:
+    `buildFormattedDocx` — when the original master template was itself a
+    `.docx`, edits `word/document.xml`'s `<w:t>` paragraph text in place
+    (only text nodes touched, `<w:pPr>`/`<w:rPr>` formatting left alone),
+    requiring the non-empty paragraph count to exactly match the rewritten
+    line count or throwing `DocxStructureMismatchError`. `buildPlainDocx`
+    — fallback (original was a PDF, structure mismatch, or file missing):
+    a clean from-scratch document, not visually the original, clearly
+    flagged as such. New `RewrittenResume.sourceTemplateId` FK pins the
+    exact template version a rewrite came from, so a later template
+    re-upload can't desync the paragraph mapping at download time. New
+    `GET /api/resume-rewrite/docx?jobId=` route generates on demand
+    (nothing cached), signals fallback usage via response headers.
+    `RewriteResumeButton.tsx` gained a "Download .docx" button.
+    **Real E2E, genuinely good result**: since no real `.docx`-format
+    resume exists in this repo's fixtures (only the PDF), built a
+    realistic `.docx` mirroring the real fixture resume's actual German
+    content/structure (name + section headers bold) via the `docx`
+    package, then ran the full real pipeline (real mammoth extraction →
+    real Gemini rewrite against the real Goldwind job → real
+    `buildFormattedDocx`). This time the line count matched **exactly**
+    (11 vs. 11 — no drift, unlike item #18's PDF-sourced test), the
+    formatting-preserving path was used (not the fallback), the output
+    passed a zip/OOXML structural check, round-tripped correctly through
+    the app's own trusted `mammoth.extractRawText()`, and the bold name
+    heading's formatting survived the rewrite. `__tests__/rewrite-
+    docx.spec.ts` (7 tests) covers formatting preservation, empty-paragraph
+    handling, the structure-mismatch error, and the plain-fallback path
+    deterministically. Full detail in ARCHITECTURE.md's "Resume rewrite
+    .docx export" section.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);
@@ -374,39 +407,35 @@ changes. Not modified — don't "fix" this without re-confirming it's still
 just load-related.
 
 ## Immediate next steps
-1. **DOCX file export for the rewritten resume** — item #18 saves plain text
-   only; a real downloadable `.docx` at `Dhruvil_Akbari_{CompanyName}_
-   Resume.docx` needs a design decision first (reconstruct the original
-   template's visual formatting vs. a clean new layout) before picking a
-   library/approach.
-2. **Cover letter generation could similarly read from `MasterTemplate`**
+1. **Cover letter generation could similarly read from `MasterTemplate`**
    (Cover Letter EN/DE slots exist and are uploadable, but
    `generateCoverLetter` still reads the structured `Resume` model, not a
    cover-letter template) — not requested yet, but a natural parallel to
-   item #18 if asked.
-3. **Full-OAuth Gmail integration** (auto-tracking, not the compose link
+   items #18/#19 if asked. A `.docx` export for cover letters would follow
+   the same `src/lib/docx/` machinery built in #19.
+2. **Full-OAuth Gmail integration** (auto-tracking, not the compose link
    built in #8). Read DECISIONS.md's "Gmail-integration security prep"
    entry *before* designing anything — it has concrete requirements (encrypt
    tokens like the existing `ApiKey` pattern, minimal scopes, OAuth `state`
    validation, fence all email content through the prompt-fencing module
    from day one, login rate limiting becomes non-theoretical once real
    tokens exist).
-4. `main` is ahead of `origin/main` — push only if/when asked.
-5. Flagged-but-unresolved model-compliance limitations remain open (German
-   B1/Konjunktiv II, factual-accuracy false positives, and now resume-rewrite
-   position-lock drift — see item #18) — revisit if real usage shows any of
-   these is too noisy, not proactively.
+3. `main` is ahead of `origin/main` — push only if/when asked.
+4. Flagged-but-unresolved model-compliance limitations remain open (German
+   B1/Konjunktiv II, factual-accuracy false positives, and resume-rewrite
+   position-lock drift — see item #18; item #19's real run happened to hit
+   an exact line-count match, but that's not a guarantee it always will)
+   — revisit if real usage shows any of these is too noisy, not proactively.
 
 ## Full feature list agreed (see ARCHITECTURE.md for technical detail)
 Gmail auto-tracking (confirm-on-downgrade, full OAuth) — next up. EN+DE ATS
 scoring ✅, cold email ✅, writing guardrails ✅, DIN 5008 + German B1 ✅,
 job-language persistence ✅, security hardening ✅, Send Email (compose-link
 v1) + Mark as Applied ✅, cover letter generation ✅, master template
-storage ✅, position-locked resume rewrite ✅ (supersedes the old
-resume-tailoring summary). Still not started: docx/pdf CV export (for the
-resume rewrite output), JD-adaptive CV structure, company-mismatch
-guardrail, recruiter-persona weighted scoring, interview prep Q&A module,
-LinkedIn networking assistant (manual-send only).
+storage ✅, position-locked resume rewrite + .docx export ✅ (supersedes the old
+resume-tailoring summary). Still not started: JD-adaptive CV structure,
+company-mismatch guardrail, recruiter-persona weighted scoring, interview
+prep Q&A module, LinkedIn networking assistant (manual-send only).
 
 ## Corrections to keep in mind
 - `coverLetter.actions.ts` has **three AI-generation functions**
