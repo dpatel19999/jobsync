@@ -58,11 +58,24 @@ export const TEXT_LIMITS = {
 // DEFAULT MODEL
 /**
  * Fallback Ollama model used by the non-streaming generation actions (cold
- * email, cover letter, tailored summary, ATS keyword extraction) when the
- * user has no model configured in their settings. Previously duplicated as
- * an inline "llama3.2" string in each action file.
+ * email, ATS keyword extraction) when the user has no model configured in
+ * their settings. Previously duplicated as an inline "llama3.2" string in
+ * each action file.
  */
 export const DEFAULT_OLLAMA_MODEL = "llama3.2:3b";
+
+/**
+ * Fallback Gemini model for cover letter + tailored summary generation when
+ * the user hasn't explicitly picked a provider in AI Settings (Ollama stays
+ * available there as an offline/no-cloud override). "gemini-2.5-flash" was
+ * the originally requested model but returns 404 "no longer available to
+ * new users" on this account's API key (verified live 2026-07-19); the
+ * 2.0-flash models return 429 quota-exceeded on the same key.
+ * "gemini-flash-latest" is the fastest model confirmed actually working
+ * end-to-end (~1-2s for a short prompt) — use that alias so it keeps
+ * pointing at Google's current fast-tier model without another manual swap.
+ */
+export const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
 
 // SCORE VARIANCE
 export const SCORE_VARIANCE = {

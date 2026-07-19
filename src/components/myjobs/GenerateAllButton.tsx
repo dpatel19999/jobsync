@@ -87,23 +87,21 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
     }
     updateStep(1, { status: "done" });
 
+    // Tailored summary and cover letter don't depend on each other's output,
+    // so they run concurrently — each still persists its own result
+    // independently, so a failure in one doesn't lose the other's success.
     updateStep(2, { status: "running" });
-    const summaryResult = await generateTailoredSummary(profileId, jobId);
-    if (!summaryResult.success) {
-      updateStep(2, { status: "error", error: summaryResult.message });
-      setRunning(false);
-      return;
-    }
-    updateStep(2, { status: "done" });
-
     updateStep(3, { status: "running" });
-    const coverLetterResult = await generateCoverLetter(profileId, jobId);
-    if (!coverLetterResult.success) {
-      updateStep(3, { status: "error", error: coverLetterResult.message });
+    const [summaryResult, coverLetterResult] = await Promise.all([
+      generateTailoredSummary(profileId, jobId),
+      generateCoverLetter(profileId, jobId),
+    ]);
+    updateStep(2, summaryResult.success ? { status: "done" } : { status: "error", error: summaryResult.message });
+    updateStep(3, coverLetterResult.success ? { status: "done" } : { status: "error", error: coverLetterResult.message });
+    if (!summaryResult.success || !coverLetterResult.success) {
       setRunning(false);
       return;
     }
-    updateStep(3, { status: "done" });
 
     if (hasColdEmail) {
       updateStep(4, { status: "skipped" });
@@ -123,15 +121,19 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
     toast({ variant: "success", description: "Generate All completed." });
   };
 
-  const runningIndex = steps.findIndex((s) => s.status === "running");
-  const errorIndex = steps.findIndex((s) => s.status === "error");
+  const runningIndices = steps.map((s, i) => i).filter((i) => steps[i].status === "running");
+  const errorIndices = steps.map((s, i) => i).filter((i) => steps[i].status === "error");
   const allSettled = steps.every((s) => s.status === "done" || s.status === "skipped");
 
   let headline: string;
-  if (errorIndex !== -1) {
-    headline = `Failed at step ${errorIndex + 1} of 5: ${steps[errorIndex].label}`;
-  } else if (runningIndex !== -1) {
-    headline = `Step ${runningIndex + 1} of 5: ${steps[runningIndex].label}...`;
+  if (errorIndices.length > 1) {
+    headline = `Failed at steps ${errorIndices.map((i) => i + 1).join(" & ")} of 5: ${errorIndices.map((i) => steps[i].label).join(" + ")}`;
+  } else if (errorIndices.length === 1) {
+    headline = `Failed at step ${errorIndices[0] + 1} of 5: ${steps[errorIndices[0]].label}`;
+  } else if (runningIndices.length > 1) {
+    headline = `Steps ${runningIndices.map((i) => i + 1).join(" & ")} of 5: ${runningIndices.map((i) => steps[i].label).join(" + ")}...`;
+  } else if (runningIndices.length === 1) {
+    headline = `Step ${runningIndices[0] + 1} of 5: ${steps[runningIndices[0]].label}...`;
   } else if (allSettled) {
     headline = "All steps completed.";
   } else {

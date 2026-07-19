@@ -10,6 +10,7 @@ import {
 import { getCurrentUser } from "@/utils/user.utils";
 import { getJobDetails } from "@/actions/job.actions";
 import { getResumeById } from "@/actions/profile.actions";
+import { DEFAULT_GEMINI_MODEL, DEFAULT_OLLAMA_MODEL } from "@/lib/ai/config";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -450,6 +451,11 @@ describe("coverLetterActions", () => {
       expect(result.content).toBe("Generated email body.");
     });
 
+    it("still defaults to Ollama (unaffected by the Gemini default added for cover letter/summary)", async () => {
+      await generateColdEmail("profile-1", "job-1");
+      expect(getModelMock).toHaveBeenCalledWith("ollama", DEFAULT_OLLAMA_MODEL, "user-id");
+    });
+
     it("fails cleanly when the job is not found", async () => {
       (getJobDetails as any).mockResolvedValue({ success: false, job: null });
       const result = await generateColdEmail("profile-1", "job-1");
@@ -678,6 +684,28 @@ describe("coverLetterActions", () => {
       expect(generateVerifiedContentMock).not.toHaveBeenCalled();
     });
 
+    it("defaults to Gemini when the user has no saved AI settings", async () => {
+      (prisma.userSettings.findUnique as any).mockResolvedValue(null);
+      await generateCoverLetter("profile-1", "job-1");
+      expect(getModelMock).toHaveBeenCalledWith("gemini", DEFAULT_GEMINI_MODEL, "user-id");
+    });
+
+    it("uses the user's saved Ollama preference instead of the Gemini default", async () => {
+      (prisma.userSettings.findUnique as any).mockResolvedValue({
+        settings: JSON.stringify({ ai: { provider: "ollama", model: "llama3.2:3b" } }),
+      });
+      await generateCoverLetter("profile-1", "job-1");
+      expect(getModelMock).toHaveBeenCalledWith("ollama", "llama3.2:3b", "user-id");
+    });
+
+    it("falls back to the Ollama default model when a saved Ollama preference omits the model", async () => {
+      (prisma.userSettings.findUnique as any).mockResolvedValue({
+        settings: JSON.stringify({ ai: { provider: "ollama" } }),
+      });
+      await generateCoverLetter("profile-1", "job-1");
+      expect(getModelMock).toHaveBeenCalledWith("ollama", DEFAULT_OLLAMA_MODEL, "user-id");
+    });
+
     it("fails cleanly when no resume can be resolved", async () => {
       (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: null });
       (prisma.resume.findFirst as any).mockResolvedValue(null);
@@ -781,6 +809,20 @@ describe("coverLetterActions", () => {
       expect(result.success).toBe(false);
       expect(result.message).toMatch(/too many ai requests/i);
       expect(generateVerifiedContentMock).not.toHaveBeenCalled();
+    });
+
+    it("defaults to Gemini when the user has no saved AI settings", async () => {
+      (prisma.userSettings.findUnique as any).mockResolvedValue(null);
+      await generateTailoredSummary("profile-1", "job-1");
+      expect(getModelMock).toHaveBeenCalledWith("gemini", DEFAULT_GEMINI_MODEL, "user-id");
+    });
+
+    it("uses the user's saved Ollama preference instead of the Gemini default", async () => {
+      (prisma.userSettings.findUnique as any).mockResolvedValue({
+        settings: JSON.stringify({ ai: { provider: "ollama", model: "llama3.2:3b" } }),
+      });
+      await generateTailoredSummary("profile-1", "job-1");
+      expect(getModelMock).toHaveBeenCalledWith("ollama", "llama3.2:3b", "user-id");
     });
 
     it("fails cleanly when no resume can be resolved", async () => {

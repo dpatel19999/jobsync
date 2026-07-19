@@ -119,7 +119,7 @@ describe("GenerateAllButton", () => {
     expect(screen.getByText(/skipped — cold email already exists/i)).toBeInTheDocument();
   });
 
-  it("stops at the failing step, keeps earlier results, and does not run later steps", async () => {
+  it("stops after the parallel summary/cover-letter pair when one fails, keeping the other's success, and does not run the cold email step", async () => {
     mockAllSucceed();
     mockGenerateTailoredSummary.mockResolvedValue({
       success: false,
@@ -137,11 +137,49 @@ describe("GenerateAllButton", () => {
     });
     expect(screen.getByText("No resume found to tailor.")).toBeInTheDocument();
 
-    // Steps 1 and 2 (keywords, score) ran; steps 4 and 5 must not have.
+    // Steps 1 and 2 (keywords, score) ran. Cover letter runs concurrently
+    // with the summary (not gated on its result) and succeeds; cold email
+    // must not run since the pair didn't both succeed.
     expect(mockExtractJobKeywords).toHaveBeenCalled();
     expect(mockScoreJob).toHaveBeenCalled();
-    expect(mockGenerateCoverLetter).not.toHaveBeenCalled();
+    expect(mockGenerateCoverLetter).toHaveBeenCalled();
     expect(mockGenerateColdEmail).not.toHaveBeenCalled();
+  });
+
+  it("runs tailored summary and cover letter concurrently, not waiting for one before starting the other", async () => {
+    mockAllSucceed();
+    let resolveSummary: (v: any) => void;
+    let resolveCoverLetter: (v: any) => void;
+    mockGenerateTailoredSummary.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSummary = resolve;
+      }),
+    );
+    mockGenerateCoverLetter.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCoverLetter = resolve;
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<GenerateAllButton jobId="job-1" hasColdEmail={false} />);
+    await user.click(screen.getByRole("button", { name: /generate all/i }));
+
+    // Both calls fire before either resolves — proves Promise.all, not a
+    // sequential await between them.
+    await waitFor(() => {
+      expect(mockGenerateCoverLetter).toHaveBeenCalled();
+    });
+    expect(mockGenerateTailoredSummary).toHaveBeenCalled();
+
+    resolveSummary!({ success: true, content: "Summary text." });
+    resolveCoverLetter!({ success: true, content: "Cover letter text." });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("generate-all-headline")).toHaveTextContent(
+        "All steps completed.",
+      );
+    });
   });
 
   it("shows an error toast and runs nothing when no profile exists", async () => {
