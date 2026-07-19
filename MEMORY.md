@@ -244,6 +244,35 @@ a past session's account was accurate.
     action-vs-route bundling distinction is the next thing to chase — don't
     assume the fix is fully confirmed end-to-end just because it's merged.
 
+15. **Gemini default extended to ATS extraction + cold email**
+    (`feature/gemini-default-ats-extraction`) — Ollama was still loading a
+    local model into RAM (system-wide lag on a 16GB machine) whenever
+    "Generate All" ran, because 2 of its 5 steps — `extractJobKeywords` and
+    `generateColdEmail` — still defaulted to Ollama even after cover letter/
+    tailored summary were switched to Gemini in the prior session. Extracted
+    the provider-default logic into a shared `src/lib/ai/default-provider.ts`
+    (`resolveDefaultAi`) and switched both remaining call sites. `scoreJob`
+    makes no AI call at all — pure local ATS core computation, never a
+    factor. **Confirmed via grep audit**: no `getModel` call in
+    `atsScore.actions.ts`/`coverLetter.actions.ts`/`GenerateAllButton.tsx`
+    falls back to `DEFAULT_OLLAMA_MODEL`/Ollama unless `resolveDefaultAi`
+    found an explicit saved provider in `UserSettings`. **Real E2E result,
+    important caveat**: ran the actual 5-step sequence for real (fixture job,
+    real backfilled resume) — step 1 (extract keywords) succeeded in 10.8s
+    (17 keywords), step 2 (score, local) in 86ms, but steps 3+4 (parallel
+    summary + cover letter) hit a **Gemini free-tier 429 quota error**
+    ("limit: 20... model: gemini-3.5-flash" — that's what `gemini-flash-
+    latest` currently resolves to on this account) after 3 retries. Full
+    "ALL 5 STEPS PASSED" could **not** be confirmed end-to-end on this test
+    run because of the exhausted daily quota, not a code defect — each
+    Generate All run makes ~4 base Gemini calls plus extra
+    `generateVerifiedContent` fact-check calls on top, so a 20-req/day
+    free-tier cap can be exhausted in as few as 2-3 runs. **This is a real,
+    live operational risk to flag, not just a one-off test-day fluke** —
+    revisit if a paid Gemini tier or per-user quota tracking becomes
+    necessary; don't assume "Ollama lag is gone" fully solves the UX problem
+    without also solving for this.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);

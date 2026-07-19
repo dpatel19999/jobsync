@@ -557,3 +557,17 @@ Format: Decision — Rationale
   gap would have required resetting a real account's password or forging a
   session — both treated as out of bounds. Flagged in MEMORY.md as a
   verification gap to revisit if the crash resurfaces.
+
+- **Gemini default extended to ATS extraction + cold email**: extracted the
+  provider-default resolution (previously a private `resolveCoverLetterAi`
+  helper duplicated in intent across 3 call sites) into a shared
+  `src/lib/ai/default-provider.ts`, rather than copy-pasting a 4th near-
+  identical block into `extractJobKeywords` — this is the same logic four
+  different actions need, not feature-specific. Decision: leave the
+  fallback-model-when-no-explicit-model-saved test coverage in
+  `default-provider.spec.ts` only, not re-duplicated in every consumer's
+  spec file, since it's now genuinely shared logic with its own single
+  source of truth. Known risk (see MEMORY.md #15): this account's Gemini
+  key hit a 20-requests/day free-tier quota wall mid-E2E-test — Generate
+  All's ~4 base calls plus guardrail fact-check calls can exhaust that in
+  2-3 runs. Not fixed here; flagged for whoever revisits this next.
