@@ -157,21 +157,21 @@ Format: Decision — Rationale
   across two independent fact-check calls before warning, or let the user
   dismiss/suppress a specific flagged claim.
 
-- **German cold-email language selection reuses ATS scoring's fresh
-  `detectAtsLanguage` (franc-min) instead of building the planned persisted
-  `Job.region`/`language` field now** — the fresh-detection approach already
-  exists, is tested, and needs no schema migration. Deliberately reusing it
-  by direct import (`@/lib/ai` re-exports `detectAtsLanguage`/`AtsLanguage`
-  from `@/lib/ats`) rather than writing a second detector. **FLAGGED FOR
-  REVIEW**: this is a real gap, not just a shortcut — a German company can
-  post an English-language job description and still want a German cold
-  email (or vice versa), and JD-text detection will guess wrong in that
-  case. Didn't build the persisted field this session because it needs a UX
-  decision only the user should make (per-job override? per-profile
-  default? does it also change ATS scoring's behavior?) rather than being
-  guessed at mid-autonomous-run. Revisit when there's a concrete case of the
-  detection guessing wrong, or when the CV-tailoring phase needs a firmer
-  language selector anyway.
+- **RESOLVED (`feature/job-language`, merged to `main`)**: German cold-email
+  language selection originally reused ATS scoring's fresh `detectAtsLanguage`
+  (franc-min) per call, flagged below as a real gap. Built the persisted
+  field: nullable `Job.language` ("en"|"de"), populated once on first
+  detection (whichever of cold-email generation or ATS scoring runs first)
+  via `resolveJobLanguage(userId, job, jobText)` in `job.actions.ts`, reused
+  by every later call instead of re-detecting. UX decision made: a manual
+  override dropdown (`JobLanguageSelect.tsx`) on the job detail page via
+  `updateJobLanguage`, so a wrong guess is a one-click fix rather than
+  needing a new job. `scoreResumeAgainstKeywords` gained an optional
+  `languageOverride` param so scoring also skips re-detection once set.
+  Verified end-to-end against real Ollama + real `dev.db` (fixture data
+  cleaned up after): detect → persist → reuse-despite-mismatched-text →
+  manual override → override-wins-over-original-text → real ATS scoring and
+  a real live cold-email generation both honored the override.
 
 - **DIN 5008 applied to cold email covers only the plain-text email
   conventions (Betreff line, salutation/closing formulas, paragraph

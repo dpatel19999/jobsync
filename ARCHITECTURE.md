@@ -194,7 +194,7 @@ human review," not "block/discard," which keeps this failure mode safe
 through silently) but it does mean warnings should be read as "worth a
 second look," not "definitely wrong."
 
-## Security hardening (done, branch `feature/security-hardening`)
+## Security hardening (done, merged to `main`)
 
 Scope: secrets audit, dependency vulnerabilities, auth review, rate
 limiting, prompt-injection fencing. Full findings/rationale in DECISIONS.md
@@ -263,13 +263,11 @@ New prompt variants under `src/lib/ai/prompts/cold-email/`: `system-de.ts`
 than branching inside the existing `system.ts`/`user.ts`, so the English
 path is untouched.
 
-`generateColdEmail` (`coverLetter.actions.ts`) detects the job description's
-language via `detectAtsLanguage` (reused directly from `src/lib/ats` — see
-DECISIONS.md for why this reuses ATS's fresh-detection instead of a
-persisted field) and picks the EN or DE system/user prompt pair and
-`generateVerifiedContent`'s `language` arg accordingly. Cover letters were
-re-confirmed to still have no AI generation, so this only touches cold
-email for now.
+`generateColdEmail` (`coverLetter.actions.ts`) originally called
+`detectAtsLanguage` fresh on every call; **superseded by the persisted
+`Job.language` field** — see "Job language persistence" section below.
+Cover letters were re-confirmed to still have no AI generation, so language
+selection only touches cold email and ATS scoring.
 
 **Verified via a real, temporary script run against local Ollama** (deleted
 after use, not committed): `detectAtsLanguage` correctly identified a German
@@ -293,3 +291,31 @@ already lives in `__tests__/*.spec.ts` (~78 files, ~1195 tests). An initial
 scan missed it (searched `*.test.ts` only). That whole suite couldn't run
 at all before this session (missing `jsdom`), which is also how a stale
 assertion in `__tests__/job.actions.spec.ts` surfaced and got fixed.
+
+## Job language persistence (done, merged to `main`)
+
+Closes the gap flagged in the region/language module above (fresh per-call
+detection would guess wrong for a German company posting an English JD, or
+vice versa).
+
+- `Job.language` — new nullable `String?` field (`"en" | "de"`), migration
+  `20260718231153_add_job_language`.
+- `resolveJobLanguage(userId, job, jobDescriptionText)` in `job.actions.ts`
+  — reuses `job.language` if already set; otherwise detects via
+  `detectAtsLanguage` and persists it. Called from `generateColdEmail`
+  (`coverLetter.actions.ts`) and `scoreJob` (`atsScore.actions.ts`) instead
+  of their old direct `detectAtsLanguage` calls, so first detection sticks
+  and every later cold-email/ATS-scoring call for that job reuses it.
+- `scoreResumeAgainstKeywords` (`src/lib/ats/index.ts`) gained an optional
+  `languageOverride` param — when passed, skips its own `detectAtsLanguage`
+  call entirely.
+- `updateJobLanguage(jobId, language)` — manual override action, backing a
+  new `JobLanguageSelect.tsx` dropdown (EN/German) on the job detail page,
+  next to the cold-email and ATS-score buttons. Optimistic UI update with
+  rollback-on-failure.
+- Verified end-to-end against real Ollama + real `dev.db` (temporary script,
+  fixture data cleaned up after): detect-and-persist on first call, reuse
+  despite a deliberately mismatched-language JD on the second call, manual
+  override persists and wins over the original JD text on a third call, and
+  both real ATS scoring and a real live cold-email generation honored the
+  override.
