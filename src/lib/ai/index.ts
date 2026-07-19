@@ -58,6 +58,7 @@ export {
   type GenerateVerifiedContentResult,
   checkPositionLock,
   countNonEmptyLines,
+  splitNonEmptyLines,
   POSITION_LOCK_RULES,
   type PositionLockCheckResult,
 } from "./guardrails";

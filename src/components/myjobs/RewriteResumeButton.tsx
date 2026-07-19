@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
-import { Loader, FileEdit } from "lucide-react";
+import { Loader, FileEdit, Download } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -36,6 +36,7 @@ export function RewriteResumeButton({
   const [content, setContent] = useState<string | null>(existingContent ?? null);
   const [warning, setWarning] = useState<string | null>(null);
   const [templateAvailable, setTemplateAvailable] = useState<boolean | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!language) {
@@ -104,6 +105,54 @@ export function RewriteResumeButton({
     });
   };
 
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const response = await fetch(
+        `/api/resume-rewrite/docx?jobId=${encodeURIComponent(jobId)}`,
+        { method: "GET" },
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        toast({
+          variant: "destructive",
+          title: "Download failed",
+          description: data?.error ?? "Failed to generate the document.",
+        });
+        return;
+      }
+
+      const usedFallback = response.headers.get("X-Docx-Formatting-Fallback") === "true";
+      const fallbackReason = response.headers.get("X-Docx-Fallback-Reason");
+      const fileName = response.headers.get("X-Docx-Filename") ?? "Resume.docx";
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      window.URL.revokeObjectURL(url);
+
+      if (usedFallback) {
+        toast({
+          description: fallbackReason
+            ? decodeURIComponent(fallbackReason)
+            : "Original formatting could not be reconstructed for this template — downloaded with basic formatting instead.",
+        });
+      }
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Download failed",
+        description: "An unexpected error occurred.",
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   // Language is known and there's no matching template — don't offer a
   // button that can only fail; show why instead.
   if (language && templateAvailable === false) {
@@ -147,6 +196,19 @@ export function RewriteResumeButton({
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Close
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-1 cursor-pointer"
+              onClick={handleDownload}
+              disabled={downloading || !content}
+            >
+              {downloading ? (
+                <Loader className="h-3.5 w-3.5 shrink-0 spinner" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              Download .docx
             </Button>
           </DialogFooter>
         </DialogContent>

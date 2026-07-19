@@ -23,6 +23,7 @@ export {
 export {
   checkPositionLock,
   countNonEmptyLines,
+  splitNonEmptyLines,
   POSITION_LOCK_RULES,
   type PositionLockCheckResult,
 } from "./position-lock";

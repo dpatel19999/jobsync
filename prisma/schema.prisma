@@ -117,16 +117,23 @@ model ColdEmail {
 
 // Position-locked resume rewrite output — see resumeRewrite.actions.ts.
 // Mirrors CoverLetter/ColdEmail's shape; content is plain rewritten resume
-// text (no DOCX/formatting reconstruction yet, see ARCHITECTURE.md).
+// text. sourceTemplateId pins the exact MasterTemplate version the AI
+// actually rewrote from, so a later .docx download (see src/lib/docx/)
+// reconstructs formatting against the SAME paragraph structure the rewrite
+// was generated against, even if the user re-imports a new template
+// version afterward (MasterTemplate rows are never deleted — see its own
+// comment — so this reference stays valid indefinitely).
 model RewrittenResume {
-  id        String   @id @default(uuid())
-  profileId String
-  title     String
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  profile   Profile  @relation(fields: [profileId], references: [id])
-  Job       Job[]
+  id               String          @id @default(uuid())
+  profileId        String
+  title            String
+  content          String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  profile          Profile         @relation(fields: [profileId], references: [id])
+  sourceTemplateId String?
+  sourceTemplate   MasterTemplate? @relation(fields: [sourceTemplateId], references: [id])
+  Job              Job[]
 }
 
 model File {
@@ -397,6 +404,7 @@ model MasterTemplate {
   filePath      String
   extractedText String
   createdAt     DateTime @default(now())
+  RewrittenResume RewrittenResume[]
 
   @@unique([userId, slot, version])
   @@index([userId, slot, isCurrent])

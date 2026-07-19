@@ -20,18 +20,7 @@ import {
   languageToTemplateLanguage,
   templateSlotFor,
 } from "@/models/template.model";
-
-// Matches the already-agreed output naming convention
-// (Dhruvil_Akbari_{CompanyName}_Resume) — used as the saved title today;
-// see ARCHITECTURE.md for why an actual .docx file with this filename isn't
-// produced yet.
-function buildResumeTitle(companyName: string): string {
-  const sanitizedCompany = companyName
-    .trim()
-    .replace(/[^a-zA-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "Company";
-  return `Dhruvil_Akbari_${sanitizedCompany}_Resume`;
-}
+import { buildResumeDocumentName } from "@/lib/resume-naming";
 
 // Rewrites the candidate's master resume template (Resume-EN or Resume-DE,
 // picked by the job's language) for one specific job — position-locked: the
@@ -138,10 +127,10 @@ export const rewriteResume = async (
       : `The rewritten resume's line structure doesn't match the template (template: ${positionLock.originalLineCount} lines, rewritten: ${positionLock.rewrittenLineCount} lines) — review carefully before using.`;
     const combinedWarning = [warning, positionLockWarning].filter(Boolean).join(" ") || null;
 
-    const title = buildResumeTitle(companyName);
+    const title = buildResumeDocumentName(companyName);
 
     const rewrittenResume = await prisma.rewrittenResume.create({
-      data: { profileId, title, content },
+      data: { profileId, title, content, sourceTemplateId: template.id },
     });
 
     await prisma.job.update({

@@ -130,6 +130,7 @@ describe("rewriteResume", () => {
         profileId: "profile-1",
         title: "Dhruvil_Akbari_Nordwind_GmbH_Resume",
         content: "Reworded summary.\n\nReworded experience.",
+        sourceTemplateId: "template-1",
       },
     });
     expect(prisma.job.update).toHaveBeenCalledWith({

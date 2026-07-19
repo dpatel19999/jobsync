@@ -21,7 +21,11 @@ export interface PositionLockCheckResult {
   rewrittenLineCount: number;
 }
 
-function nonEmptyLines(text: string): string[] {
+// Exposed (not just used internally) so every consumer that needs to know
+// what "one line" means for this feature — the prompt builders, this
+// module's own check, and the .docx export's paragraph-alignment logic —
+// shares exactly one definition instead of three that could drift apart.
+export function splitNonEmptyLines(text: string): string[] {
   return text
     .split("\n")
     .map((line) => line.trim())
@@ -32,15 +36,15 @@ function nonEmptyLines(text: string): string[] {
 // line count up front — a concrete number is a much stronger instruction
 // than an abstract "preserve the structure" rule.
 export function countNonEmptyLines(text: string): number {
-  return nonEmptyLines(text).length;
+  return splitNonEmptyLines(text).length;
 }
 
 export function checkPositionLock(
   originalText: string,
   rewrittenText: string,
 ): PositionLockCheckResult {
-  const originalLineCount = nonEmptyLines(originalText).length;
-  const rewrittenLineCount = nonEmptyLines(rewrittenText).length;
+  const originalLineCount = splitNonEmptyLines(originalText).length;
+  const rewrittenLineCount = splitNonEmptyLines(rewrittenText).length;
   return {
     matched: originalLineCount === rewrittenLineCount,
     originalLineCount,
