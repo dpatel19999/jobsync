@@ -6,8 +6,10 @@ import {
   getJobsList,
   getJobSourceList,
   getStatusList,
+  resolveJobLanguage,
   saveJobMatchResult,
   updateJob,
+  updateJobLanguage,
   updateJobStatus,
 } from "@/actions/job.actions";
 import { getMockJobDetails, getMockJobsList } from "@/lib/mock.utils";
@@ -990,6 +992,93 @@ describe("jobActions", () => {
       });
     });
   });
+  describe("updateJobLanguage", () => {
+    it("persists a manual 'de' override", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma.job.update as any).mockResolvedValue({ id: "job-id", language: "de" });
+
+      const result = await updateJobLanguage("job-id", "de");
+
+      expect(result).toStrictEqual({
+        job: { id: "job-id", language: "de" },
+        success: true,
+      });
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-id", userId: mockUser.id },
+        data: { language: "de" },
+      });
+    });
+
+    it("rejects a value that isn't 'en' or 'de'", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+
+      const result = await updateJobLanguage("job-id", "fr" as any);
+
+      expect(result).toStrictEqual({
+        success: false,
+        message: "Language must be 'en' or 'de'",
+      });
+      expect(prisma.job.update).not.toHaveBeenCalled();
+    });
+
+    it("returns an auth error when not signed in", async () => {
+      (getCurrentUser as any).mockResolvedValue(null);
+
+      await expect(updateJobLanguage("job-id", "en")).resolves.toStrictEqual({
+        success: false,
+        message: "Not authenticated",
+      });
+    });
+  });
+
+  describe("resolveJobLanguage", () => {
+    const ENGLISH_JD = `We are looking for a Backend Engineer to join our platform team. You will work with Node.js, PostgreSQL, and AWS to build scalable services. Experience with Docker and REST API design is a plus. This is a full-time position based in our downtown office with flexible working hours.`;
+    const GERMAN_JD = `Wir suchen einen Backend-Entwickler fuer unser Plattform-Team. Sie arbeiten mit Node.js, PostgreSQL und AWS an skalierbaren Diensten. Erfahrung mit Docker und REST-API-Design ist von Vorteil. Diese Stelle ist in Vollzeit und befindet sich in unserem Buero in Berlin.`;
+
+    it("reuses the persisted language without touching the database when already set", async () => {
+      const result = await resolveJobLanguage(
+        mockUser.id,
+        { id: "job-id", language: "de" },
+        ENGLISH_JD, // deliberately mismatched — persisted value must win
+      );
+
+      expect(result).toBe("de");
+      expect(prisma.job.update).not.toHaveBeenCalled();
+    });
+
+    it("detects and persists the language on first call when unset", async () => {
+      (prisma.job.update as any).mockResolvedValue({ id: "job-id", language: "en" });
+
+      const result = await resolveJobLanguage(
+        mockUser.id,
+        { id: "job-id", language: null },
+        ENGLISH_JD,
+      );
+
+      expect(result).toBe("en");
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-id", userId: mockUser.id },
+        data: { language: "en" },
+      });
+    });
+
+    it("detects German text and persists 'de'", async () => {
+      (prisma.job.update as any).mockResolvedValue({ id: "job-id", language: "de" });
+
+      const result = await resolveJobLanguage(
+        mockUser.id,
+        { id: "job-id", language: undefined },
+        GERMAN_JD,
+      );
+
+      expect(result).toBe("de");
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-id", userId: mockUser.id },
+        data: { language: "de" },
+      });
+    });
+  });
+
   describe("deleteJobById", () => {
     it("should return error when user is not authenticated", async () => {
       (getCurrentUser as any).mockResolvedValue(null);

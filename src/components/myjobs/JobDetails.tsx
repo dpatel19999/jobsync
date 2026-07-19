@@ -59,6 +59,7 @@ import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toast } from "../ui/use-toast";
 import { GenerateColdEmailButton } from "./GenerateColdEmailButton";
 import { AtsScoreSection } from "./AtsScoreSection";
+import { JobLanguageSelect } from "./JobLanguageSelect";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -187,6 +188,7 @@ function JobDetails({
               Match with AI
             </span>
           </Button>
+          <JobLanguageSelect jobId={job.id} initialLanguage={job.language} />
           <GenerateColdEmailButton
             jobId={job.id}
             existingContent={job.ColdEmail?.content}

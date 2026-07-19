@@ -27,8 +27,6 @@ vi.mock("@prisma/client", () => {
 });
 
 vi.mock("@/utils/user.utils", () => ({ getCurrentUser: vi.fn() }));
-vi.mock("@/actions/job.actions", () => ({ getJobDetails: vi.fn() }));
-vi.mock("@/actions/profile.actions", () => ({ getResumeById: vi.fn() }));
 vi.mock("ai", () => ({ generateText: vi.fn() }));
 
 const {
@@ -36,12 +34,19 @@ const {
   preprocessResumeMock,
   preprocessJobMock,
   checkRateLimitMock,
+  resolveJobLanguageMock,
 } = vi.hoisted(() => ({
   getModelMock: vi.fn(),
   preprocessResumeMock: vi.fn(),
   preprocessJobMock: vi.fn(),
   checkRateLimitMock: vi.fn(),
+  resolveJobLanguageMock: vi.fn(),
 }));
+vi.mock("@/actions/job.actions", () => ({
+  getJobDetails: vi.fn(),
+  resolveJobLanguage: resolveJobLanguageMock,
+}));
+vi.mock("@/actions/profile.actions", () => ({ getResumeById: vi.fn() }));
 vi.mock("@/lib/ai", () => ({
   getModel: getModelMock,
   preprocessResume: preprocessResumeMock,
@@ -126,6 +131,7 @@ describe("scoreJob — edge cases", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (getCurrentUser as any).mockResolvedValue(VALID_USER);
+    resolveJobLanguageMock.mockResolvedValue("en");
   });
 
   it("fails cleanly when the job has no keywords to score against", async () => {
@@ -148,7 +154,11 @@ describe("scoreJob — edge cases", () => {
     expect(result.message).toMatch(/no resume/i);
   });
 
-  it("scores a non-English/non-German job description without crashing (real ATS pipeline, no mocking)", async () => {
+  it("scores a non-English/non-German job description without crashing (real scoring pipeline, no mocking)", async () => {
+    // Language fallback itself (franc forced to pick en/de for French text)
+    // is covered directly in language-detect.spec.ts; here resolveJobLanguage
+    // is mocked and this test only checks the scoring core doesn't choke on
+    // whatever language comes back.
     (getJobDetails as any).mockResolvedValue({ success: true, job: { id: "job-1", resumeId: "resume-1" } });
     (prisma.jobKeyword.findMany as any).mockResolvedValue([
       { id: "k1", text: "Node.js" },
@@ -162,8 +172,6 @@ describe("scoreJob — edge cases", () => {
     preprocessJobMock.mockResolvedValue({
       success: true,
       data: {
-        // French — neither English nor German; language-detect is forced to
-        // pick one of the two rather than crash (see language-detect.spec.ts).
         normalizedText:
           "Nous recherchons un ingenieur backend pour rejoindre notre equipe de plateforme technique tres avancee.",
       },
@@ -172,6 +180,34 @@ describe("scoreJob — edge cases", () => {
     const result = await scoreJob("job-1");
     expect(result.success).toBe(true);
     expect(typeof result.score).toBe("number");
-    expect(["en", "de"]).toContain(result.data.language);
+    expect(result.data.language).toBe("en"); // from the mocked resolveJobLanguage
+  });
+
+  it("resolves language via the job's persisted field/detection and passes it straight through to scoring (no re-detection)", async () => {
+    (getJobDetails as any).mockResolvedValue({
+      success: true,
+      job: { id: "job-1", resumeId: "resume-1", language: "de" },
+    });
+    (prisma.jobKeyword.findMany as any).mockResolvedValue([{ id: "k1", text: "Node.js" }]);
+    (getResumeById as any).mockResolvedValue({ success: true, data: { id: "resume-1", title: "My Resume" } });
+    preprocessResumeMock.mockResolvedValue({
+      success: true,
+      data: { normalizedText: "Erfahrung mit Node.js." },
+    });
+    preprocessJobMock.mockResolvedValue({
+      success: true,
+      data: { normalizedText: "Wir suchen einen Entwickler mit Node.js Erfahrung." },
+    });
+    resolveJobLanguageMock.mockResolvedValue("de");
+
+    const result = await scoreJob("job-1");
+
+    expect(result.success).toBe(true);
+    expect(result.data.language).toBe("de");
+    expect(resolveJobLanguageMock).toHaveBeenCalledWith(
+      VALID_USER.id,
+      expect.objectContaining({ id: "job-1", language: "de" }),
+      "Wir suchen einen Entwickler mit Node.js Erfahrung.",
+    );
   });
 });

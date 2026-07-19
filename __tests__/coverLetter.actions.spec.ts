@@ -38,7 +38,15 @@ vi.mock("@prisma/client", () => {
 vi.mock("@/utils/user.utils", () => ({
   getCurrentUser: vi.fn(),
 }));
-vi.mock("@/actions/job.actions", () => ({ getJobDetails: vi.fn() }));
+
+const { getJobDetailsMock, resolveJobLanguageMock } = vi.hoisted(() => ({
+  getJobDetailsMock: vi.fn(),
+  resolveJobLanguageMock: vi.fn(),
+}));
+vi.mock("@/actions/job.actions", () => ({
+  getJobDetails: getJobDetailsMock,
+  resolveJobLanguage: resolveJobLanguageMock,
+}));
 vi.mock("@/actions/profile.actions", () => ({ getResumeById: vi.fn() }));
 
 const {
@@ -46,14 +54,12 @@ const {
   preprocessResumeMock,
   preprocessJobMock,
   generateVerifiedContentMock,
-  detectAtsLanguageMock,
   checkRateLimitMock,
 } = vi.hoisted(() => ({
   getModelMock: vi.fn(),
   preprocessResumeMock: vi.fn(),
   preprocessJobMock: vi.fn(),
   generateVerifiedContentMock: vi.fn(),
-  detectAtsLanguageMock: vi.fn(),
   checkRateLimitMock: vi.fn(),
 }));
 vi.mock("@/lib/ai", () => ({
@@ -65,7 +71,6 @@ vi.mock("@/lib/ai", () => ({
   COLD_EMAIL_SYSTEM_PROMPT_DE: "DE_SYSTEM",
   buildColdEmailPromptDe: (_resume: string, _job: string, company: string) => `DE_PROMPT:${company}`,
   generateVerifiedContent: generateVerifiedContentMock,
-  detectAtsLanguage: detectAtsLanguageMock,
   checkRateLimit: checkRateLimitMock,
 }));
 
@@ -411,7 +416,7 @@ describe("coverLetterActions", () => {
       });
       (prisma.userSettings.findUnique as any).mockResolvedValue(null);
       getModelMock.mockResolvedValue({ modelId: "mock-model" });
-      detectAtsLanguageMock.mockReturnValue("en");
+      resolveJobLanguageMock.mockResolvedValue("en");
       checkRateLimitMock.mockReturnValue({ allowed: true, remaining: 4, resetIn: 60000 });
       generateVerifiedContentMock.mockResolvedValue({
         content: "Generated email body.",
@@ -487,8 +492,8 @@ describe("coverLetterActions", () => {
       expect(generateVerifiedContentMock).not.toHaveBeenCalled();
     });
 
-    it("routes to the German prompt pair when detectAtsLanguage returns 'de'", async () => {
-      detectAtsLanguageMock.mockReturnValue("de");
+    it("routes to the German prompt pair when resolveJobLanguage returns 'de'", async () => {
+      resolveJobLanguageMock.mockResolvedValue("de");
       await generateColdEmail("profile-1", "job-1");
 
       const callArgs = generateVerifiedContentMock.mock.calls[0][0];
@@ -497,14 +502,51 @@ describe("coverLetterActions", () => {
       expect(callArgs.language).toBe("de");
     });
 
-    it("routes to the English prompt pair when detectAtsLanguage returns 'en'", async () => {
-      detectAtsLanguageMock.mockReturnValue("en");
+    it("routes to the English prompt pair when resolveJobLanguage returns 'en'", async () => {
+      resolveJobLanguageMock.mockResolvedValue("en");
       await generateColdEmail("profile-1", "job-1");
 
       const callArgs = generateVerifiedContentMock.mock.calls[0][0];
       expect(callArgs.system).toBe("EN_SYSTEM");
       expect(callArgs.prompt).toContain("EN_PROMPT");
       expect(callArgs.language).toBe("en");
+    });
+
+    it("resolves language via the job's persisted field/detection, passing the job and job text through", async () => {
+      await generateColdEmail("profile-1", "job-1");
+
+      expect(resolveJobLanguageMock).toHaveBeenCalledWith(
+        mockUser.id,
+        expect.objectContaining({ id: "job-1" }),
+        "Job text for Backend Engineer role.",
+      );
+    });
+
+    it("does not re-detect language when the job already has one persisted — reuses whatever resolveJobLanguage returns", async () => {
+      (getJobDetails as any).mockResolvedValue({
+        success: true,
+        job: {
+          id: "job-1",
+          resumeId: null,
+          language: "de", // already persisted from a prior scoring/generation
+          Company: { label: "Nordwind" },
+          JobTitle: { label: "Backend Engineer" },
+        },
+      });
+      resolveJobLanguageMock.mockResolvedValue("de");
+
+      const result = await generateColdEmail("profile-1", "job-1");
+
+      expect(result.success).toBe(true);
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      expect(callArgs.language).toBe("de");
+      // The persisted job (with language: "de") is what got passed in —
+      // resolveJobLanguage owns whether to re-detect or trust it.
+      expect(resolveJobLanguageMock).toHaveBeenCalledWith(
+        mockUser.id,
+        expect.objectContaining({ language: "de" }),
+        expect.any(String),
+      );
     });
 
     it("truncates very long resume/job text before handing it to generateVerifiedContent (Ollama provider)", async () => {

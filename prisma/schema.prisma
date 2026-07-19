@@ -340,6 +340,10 @@ model Job {
   atsScore     Int?
   atsScoreData String?
 
+  // "en" | "de" — populated once on first detection (first generation/scoring),
+  // user-overridable from the job detail page. Null = not yet detected.
+  language String?
+
   // MCP provenance: which agent/token created this job (null = UI or automation)
   createdVia      String?
 

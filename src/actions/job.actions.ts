@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/utils/user.utils";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { detectAtsLanguage, type AtsLanguage } from "@/lib/ats";
 
 export const getStatusList = async (): Promise<any | undefined> => {
   try {
@@ -491,6 +492,56 @@ export const updateJobStatus = async (
     const msg = "Failed to update job status.";
     return handleError(error, msg);
   }
+};
+
+// Manual override for the persisted EN/DE detection (Job.language). Used
+// when the automatic detection guessed wrong on first generation/scoring.
+export const updateJobLanguage = async (
+  jobId: string,
+  language: "en" | "de",
+): Promise<any | undefined> => {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+    if (language !== "en" && language !== "de") {
+      throw new Error("Language must be 'en' or 'de'");
+    }
+
+    const job = await prisma.job.update({
+      where: {
+        id: jobId,
+        userId: user.id,
+      },
+      data: { language },
+    });
+    return { job, success: true };
+  } catch (error) {
+    const msg = "Failed to update job language.";
+    return handleError(error, msg);
+  }
+};
+
+// Resolves the job's EN/DE language: reuses the persisted Job.language field
+// if already set (by a prior detection or manual override), otherwise
+// detects it from the job description text and persists it so subsequent
+// calls (cold email, ATS scoring) reuse the same value instead of
+// re-detecting per call.
+export const resolveJobLanguage = async (
+  userId: string,
+  job: { id: string; language?: string | null },
+  jobDescriptionText: string,
+): Promise<AtsLanguage> => {
+  if (job.language === "en" || job.language === "de") {
+    return job.language;
+  }
+  const language = detectAtsLanguage(jobDescriptionText);
+  await prisma.job.update({
+    where: { id: job.id, userId },
+    data: { language },
+  });
+  return language;
 };
 
 export const saveJobMatchResult = async (

@@ -13,7 +13,7 @@ import {
 } from "@/lib/ai";
 import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
-import { getJobDetails } from "@/actions/job.actions";
+import { getJobDetails, resolveJobLanguage } from "@/actions/job.actions";
 import { defaultUserSettings } from "@/models/userSettings.model";
 import { scoreResumeAgainstKeywords } from "@/lib/ats";
 
@@ -236,10 +236,17 @@ export const scoreJob = async (jobId: string): Promise<any | undefined> => {
       throw new Error(jobPre.error.message);
     }
 
+    const language = await resolveJobLanguage(
+      user.id,
+      job,
+      jobPre.data.normalizedText,
+    );
+
     const result = await scoreResumeAgainstKeywords(
       resumePre.data.normalizedText,
       keywords.map((k) => k.text),
       jobPre.data.normalizedText,
+      language,
     );
 
     const atsScoreData = JSON.stringify({

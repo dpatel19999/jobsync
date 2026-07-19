@@ -28,8 +28,9 @@ export async function scoreResumeAgainstKeywords(
   resumeText: string,
   keywords: string[],
   jobDescriptionText: string,
+  languageOverride?: AtsLanguage,
 ): Promise<AtsScoreResult> {
-  const language = detectAtsLanguage(jobDescriptionText);
+  const language = languageOverride ?? detectAtsLanguage(jobDescriptionText);
   const adapter = ADAPTERS[language];
 
   const resumeTokens = new Set(await adapter.tokenize(resumeText));

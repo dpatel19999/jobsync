@@ -12,12 +12,11 @@ import {
   COLD_EMAIL_SYSTEM_PROMPT_DE,
   buildColdEmailPromptDe,
   generateVerifiedContent,
-  detectAtsLanguage,
   checkRateLimit,
 } from "@/lib/ai";
 import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
-import { getJobDetails } from "@/actions/job.actions";
+import { getJobDetails, resolveJobLanguage } from "@/actions/job.actions";
 import { defaultUserSettings } from "@/models/userSettings.model";
 
 export const getCoverLetterList = async (
@@ -260,11 +259,14 @@ export const generateColdEmail = async (
 
     const companyName = job.Company?.label ?? "the company";
 
-    // Fresh EN/DE detection from the job description text, reusing the ATS
-    // module's detector rather than a persisted Job.region/language field
-    // (see DECISIONS.md — deferred pending a UX decision on a user-facing
-    // language override).
-    const language = detectAtsLanguage(jobPre.data.normalizedText);
+    // Reuses the persisted Job.language field if already set (by a prior
+    // detection or manual override on the job detail page); otherwise
+    // detects from the job description text and persists it.
+    const language = await resolveJobLanguage(
+      user.id,
+      job,
+      jobPre.data.normalizedText,
+    );
 
     // TEXT_LIMITS existed but was never wired in anywhere — long resumes/JDs
     // were going to the model uncapped. Truncate here, provider-aware.

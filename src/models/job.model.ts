@@ -80,6 +80,7 @@ export interface JobResponse {
   Keywords?: JobKeyword[];
   atsScore?: number | null;
   atsScoreData?: string | null;
+  language?: "en" | "de" | null;
   tags?: Tag[];
   createdVia?: string | null;
   discoveryStatus?: string | null;
