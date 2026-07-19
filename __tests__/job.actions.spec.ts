@@ -727,6 +727,7 @@ describe("jobActions", () => {
         },
         CoverLetter: true,
         ColdEmail: true,
+        RewrittenResume: true,
         Keywords: true,
         tags: true,
       },

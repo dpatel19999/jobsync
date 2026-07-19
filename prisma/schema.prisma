@@ -67,12 +67,13 @@ model UserSettings {
 }
 
 model Profile {
-  id           String        @id @default(uuid())
-  userId       String
-  user         User          @relation(fields: [userId], references: [id])
-  resumes      Resume[]
-  coverLetters CoverLetter[]
-  coldEmails   ColdEmail[]
+  id               String            @id @default(uuid())
+  userId           String
+  user             User              @relation(fields: [userId], references: [id])
+  resumes          Resume[]
+  coverLetters     CoverLetter[]
+  coldEmails       ColdEmail[]
+  rewrittenResumes RewrittenResume[]
 }
 
 model Resume {
@@ -104,6 +105,20 @@ model CoverLetter {
 }
 
 model ColdEmail {
+  id        String   @id @default(uuid())
+  profileId String
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profile   Profile  @relation(fields: [profileId], references: [id])
+  Job       Job[]
+}
+
+// Position-locked resume rewrite output — see resumeRewrite.actions.ts.
+// Mirrors CoverLetter/ColdEmail's shape; content is plain rewritten resume
+// text (no DOCX/formatting reconstruction yet, see ARCHITECTURE.md).
+model RewrittenResume {
   id        String   @id @default(uuid())
   profileId String
   title     String
@@ -325,6 +340,8 @@ model Job {
   coverLetterId String?
   ColdEmail     ColdEmail?   @relation(fields: [coldEmailId], references: [id])
   coldEmailId   String?
+  RewrittenResume   RewrittenResume? @relation(fields: [rewrittenResumeId], references: [id])
+  rewrittenResumeId String?
   Notes         Note[]
   tags        Tag[]
 
@@ -352,9 +369,9 @@ model Job {
   // MCP provenance: which agent/token created this job (null = UI or automation)
   createdVia      String?
 
-  // Resume tailoring: AI-generated 2-3 sentence summary highlighting resume
-  // experience relevant to this specific job. Editable/copyable on the job
-  // detail page — never written back into the actual resume.
+  // Resume tailoring (superseded by RewrittenResume/rewrittenResumeId — see
+  // resumeRewrite.actions.ts): AI-generated 2-3 sentence summary. Field kept,
+  // unwired from the UI, so existing values aren't destroyed.
   tailoredSummary String?
 
   @@index([userId, automationId])

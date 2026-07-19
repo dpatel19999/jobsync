@@ -1,4 +1,4 @@
-import { ColdEmail, CoverLetter, Resume } from "./profile.model";
+import { ColdEmail, CoverLetter, Resume, RewrittenResume } from "./profile.model";
 
 export interface JobForm {
   id?: string;
@@ -75,6 +75,8 @@ export interface JobResponse {
   CoverLetter?: CoverLetter;
   coldEmailId?: string;
   ColdEmail?: ColdEmail;
+  rewrittenResumeId?: string;
+  RewrittenResume?: RewrittenResume;
   matchScore?: number | null;
   matchData?: string | null;
   Keywords?: JobKeyword[];

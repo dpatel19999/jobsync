@@ -13,10 +13,10 @@ import {
 import { toast } from "../ui/use-toast";
 import { extractJobKeywords, scoreJob } from "@/actions/atsScore.actions";
 import {
-  generateTailoredSummary,
   generateCoverLetter,
   generateColdEmail,
 } from "@/actions/coverLetter.actions";
+import { rewriteResume } from "@/actions/resumeRewrite.actions";
 import { getCurrentProfileId } from "@/actions/profile.actions";
 
 type StepStatus = "pending" | "running" | "done" | "error" | "skipped";
@@ -27,7 +27,7 @@ const OFFLINE_FALLBACK_NOTE = "Using offline mode — Gemini quota reached.";
 const STEP_LABELS = [
   "Extract ATS keywords",
   "Score resume against keywords",
-  "Generate tailored summary",
+  "Rewrite resume",
   "Generate cover letter",
   "Generate cold email",
 ];
@@ -92,20 +92,20 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
     }
     updateStep(1, { status: "done" });
 
-    // Tailored summary and cover letter don't depend on each other's output,
+    // Resume rewrite and cover letter don't depend on each other's output,
     // so they run concurrently — each still persists its own result
     // independently, so a failure in one doesn't lose the other's success.
     updateStep(2, { status: "running" });
     updateStep(3, { status: "running" });
-    const [summaryResult, coverLetterResult] = await Promise.all([
-      generateTailoredSummary(profileId, jobId),
+    const [rewriteResult, coverLetterResult] = await Promise.all([
+      rewriteResume(profileId, jobId),
       generateCoverLetter(profileId, jobId),
     ]);
     updateStep(
       2,
-      summaryResult.success
-        ? { status: "done", note: summaryResult.usedOfflineFallback ? OFFLINE_FALLBACK_NOTE : undefined }
-        : { status: "error", error: summaryResult.message },
+      rewriteResult.success
+        ? { status: "done", note: rewriteResult.usedOfflineFallback ? OFFLINE_FALLBACK_NOTE : undefined }
+        : { status: "error", error: rewriteResult.message },
     );
     updateStep(
       3,
@@ -113,7 +113,7 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
         ? { status: "done", note: coverLetterResult.usedOfflineFallback ? OFFLINE_FALLBACK_NOTE : undefined }
         : { status: "error", error: coverLetterResult.message },
     );
-    if (!summaryResult.success || !coverLetterResult.success) {
+    if (!rewriteResult.success || !coverLetterResult.success) {
       setRunning(false);
       return;
     }
@@ -140,7 +140,7 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
     router.refresh();
     const anyOffline =
       keywordsResult.usedOfflineFallback ||
-      summaryResult.usedOfflineFallback ||
+      rewriteResult.usedOfflineFallback ||
       coverLetterResult.usedOfflineFallback ||
       coldEmailUsedFallback;
     toast({

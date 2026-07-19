@@ -33,6 +33,10 @@ export {
   buildTailoredSummaryPrompt,
   TAILORED_SUMMARY_SYSTEM_PROMPT_DE,
   buildTailoredSummaryPromptDe,
+  RESUME_REWRITE_SYSTEM_PROMPT,
+  buildResumeRewritePrompt,
+  RESUME_REWRITE_SYSTEM_PROMPT_DE,
+  buildResumeRewritePromptDe,
 } from "./prompts";
 
 // Analysis tools
@@ -52,6 +56,10 @@ export {
   type FactualCheckResult,
   type GenerateVerifiedContentArgs,
   type GenerateVerifiedContentResult,
+  checkPositionLock,
+  countNonEmptyLines,
+  POSITION_LOCK_RULES,
+  type PositionLockCheckResult,
 } from "./guardrails";
 
 // Region/language detection (reused from the ATS module's EN/DE detector —

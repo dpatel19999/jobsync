@@ -53,10 +53,19 @@ export {
   buildCoverLetterPromptDe,
 } from "./cover-letter";
 
-// Tailored Resume Summary exports (EN + DE)
+// Tailored Resume Summary exports (EN + DE) — superseded by Resume Rewrite
+// below, kept for the (now UI-unwired) generateTailoredSummary action.
 export {
   TAILORED_SUMMARY_SYSTEM_PROMPT,
   buildTailoredSummaryPrompt,
   TAILORED_SUMMARY_SYSTEM_PROMPT_DE,
   buildTailoredSummaryPromptDe,
 } from "./tailored-summary";
+
+// Position-Locked Resume Rewrite exports (EN + DE)
+export {
+  RESUME_REWRITE_SYSTEM_PROMPT,
+  buildResumeRewritePrompt,
+  RESUME_REWRITE_SYSTEM_PROMPT_DE,
+  buildResumeRewritePromptDe,
+} from "./resume-rewrite";

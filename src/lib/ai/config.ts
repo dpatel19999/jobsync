@@ -47,11 +47,17 @@ export const TEXT_LIMITS = {
   OLLAMA: {
     RESUME: 1500,
     JOB: 1200,
+    // Resume rewrite needs the FULL template, not a highlights-only excerpt
+    // (truncating it would silently violate the position-lock "don't remove
+    // content" requirement) — a more generous budget than the RESUME kind
+    // above, which exists for summary/highlight-style prompts.
+    RESUME_REWRITE: 6000,
   },
   /** Character limit for cloud providers */
   CLOUD: {
     RESUME: 4000,
     JOB: 3500,
+    RESUME_REWRITE: 20000,
   },
 } as const;
 
@@ -108,7 +114,7 @@ export const SCORE_VARIANCE = {
 export function truncateForProvider(
   text: string,
   provider: string,
-  kind: "RESUME" | "JOB",
+  kind: "RESUME" | "JOB" | "RESUME_REWRITE",
 ): string {
   const limits = provider === "ollama" ? TEXT_LIMITS.OLLAMA : TEXT_LIMITS.CLOUD;
   const maxChars = limits[kind];

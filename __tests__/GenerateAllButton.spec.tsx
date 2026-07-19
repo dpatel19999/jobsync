@@ -10,13 +10,15 @@ vi.mock("@/actions/atsScore.actions", () => ({
   scoreJob: (...args: any[]) => mockScoreJob(...args),
 }));
 
-const mockGenerateTailoredSummary = vi.fn();
+const mockRewriteResume = vi.fn();
 const mockGenerateCoverLetter = vi.fn();
 const mockGenerateColdEmail = vi.fn();
 vi.mock("@/actions/coverLetter.actions", () => ({
-  generateTailoredSummary: (...args: any[]) => mockGenerateTailoredSummary(...args),
   generateCoverLetter: (...args: any[]) => mockGenerateCoverLetter(...args),
   generateColdEmail: (...args: any[]) => mockGenerateColdEmail(...args),
+}));
+vi.mock("@/actions/resumeRewrite.actions", () => ({
+  rewriteResume: (...args: any[]) => mockRewriteResume(...args),
 }));
 
 const mockGetCurrentProfileId = vi.fn();
@@ -58,7 +60,7 @@ function mockAllSucceed() {
   mockGetCurrentProfileId.mockResolvedValue("profile-1");
   mockExtractJobKeywords.mockResolvedValue({ success: true, data: [] });
   mockScoreJob.mockResolvedValue({ success: true, score: 80 });
-  mockGenerateTailoredSummary.mockResolvedValue({ success: true, content: "Summary text." });
+  mockRewriteResume.mockResolvedValue({ success: true, content: "Rewritten resume text." });
   mockGenerateCoverLetter.mockResolvedValue({ success: true, content: "Cover letter text." });
   mockGenerateColdEmail.mockResolvedValue({ success: true, content: "Cold email text." });
 }
@@ -83,15 +85,15 @@ describe("GenerateAllButton", () => {
 
     expect(mockExtractJobKeywords).toHaveBeenCalledWith("job-1");
     expect(mockScoreJob).toHaveBeenCalledWith("job-1");
-    expect(mockGenerateTailoredSummary).toHaveBeenCalledWith("profile-1", "job-1");
+    expect(mockRewriteResume).toHaveBeenCalledWith("profile-1", "job-1");
     expect(mockGenerateCoverLetter).toHaveBeenCalledWith("profile-1", "job-1");
     expect(mockGenerateColdEmail).toHaveBeenCalledWith("profile-1", "job-1");
 
-    // Order matters: keywords -> score -> summary -> cover letter -> cold email.
+    // Order matters: keywords -> score -> rewrite -> cover letter -> cold email.
     const order = [
       mockExtractJobKeywords,
       mockScoreJob,
-      mockGenerateTailoredSummary,
+      mockRewriteResume,
       mockGenerateCoverLetter,
       mockGenerateColdEmail,
     ].map((m) => m.mock.invocationCallOrder[0]);
@@ -142,11 +144,11 @@ describe("GenerateAllButton", () => {
     expect(screen.getByText(/skipped — cold email already exists/i)).toBeInTheDocument();
   });
 
-  it("stops after the parallel summary/cover-letter pair when one fails, keeping the other's success, and does not run the cold email step", async () => {
+  it("stops after the parallel rewrite/cover-letter pair when one fails, keeping the other's success, and does not run the cold email step", async () => {
     mockAllSucceed();
-    mockGenerateTailoredSummary.mockResolvedValue({
+    mockRewriteResume.mockResolvedValue({
       success: false,
-      message: "No resume found to tailor.",
+      message: "No English resume template uploaded yet.",
     });
     const user = userEvent.setup();
     render(<GenerateAllButton jobId="job-1" hasColdEmail={false} />);
@@ -155,13 +157,13 @@ describe("GenerateAllButton", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("generate-all-headline")).toHaveTextContent(
-        "Failed at step 3 of 5: Generate tailored summary",
+        "Failed at step 3 of 5: Rewrite resume",
       );
     });
-    expect(screen.getByText("No resume found to tailor.")).toBeInTheDocument();
+    expect(screen.getByText("No English resume template uploaded yet.")).toBeInTheDocument();
 
     // Steps 1 and 2 (keywords, score) ran. Cover letter runs concurrently
-    // with the summary (not gated on its result) and succeeds; cold email
+    // with the rewrite (not gated on its result) and succeeds; cold email
     // must not run since the pair didn't both succeed.
     expect(mockExtractJobKeywords).toHaveBeenCalled();
     expect(mockScoreJob).toHaveBeenCalled();
@@ -169,13 +171,13 @@ describe("GenerateAllButton", () => {
     expect(mockGenerateColdEmail).not.toHaveBeenCalled();
   });
 
-  it("runs tailored summary and cover letter concurrently, not waiting for one before starting the other", async () => {
+  it("runs resume rewrite and cover letter concurrently, not waiting for one before starting the other", async () => {
     mockAllSucceed();
-    let resolveSummary: (v: any) => void;
+    let resolveRewrite: (v: any) => void;
     let resolveCoverLetter: (v: any) => void;
-    mockGenerateTailoredSummary.mockReturnValue(
+    mockRewriteResume.mockReturnValue(
       new Promise((resolve) => {
-        resolveSummary = resolve;
+        resolveRewrite = resolve;
       }),
     );
     mockGenerateCoverLetter.mockReturnValue(
@@ -193,9 +195,9 @@ describe("GenerateAllButton", () => {
     await waitFor(() => {
       expect(mockGenerateCoverLetter).toHaveBeenCalled();
     });
-    expect(mockGenerateTailoredSummary).toHaveBeenCalled();
+    expect(mockRewriteResume).toHaveBeenCalled();
 
-    resolveSummary!({ success: true, content: "Summary text." });
+    resolveRewrite!({ success: true, content: "Rewritten resume text." });
     resolveCoverLetter!({ success: true, content: "Cover letter text." });
 
     await waitFor(() => {

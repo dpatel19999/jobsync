@@ -20,3 +20,9 @@ export {
   type GenerateVerifiedContentArgs,
   type GenerateVerifiedContentResult,
 } from "./generate-verified";
+export {
+  checkPositionLock,
+  countNonEmptyLines,
+  POSITION_LOCK_RULES,
+  type PositionLockCheckResult,
+} from "./position-lock";

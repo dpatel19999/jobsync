@@ -60,7 +60,7 @@ import { toast } from "../ui/use-toast";
 import { GenerateColdEmailButton } from "./GenerateColdEmailButton";
 import { GenerateCoverLetterButton } from "./GenerateCoverLetterButton";
 import { GenerateAllButton } from "./GenerateAllButton";
-import { TailoredSummarySection } from "./TailoredSummarySection";
+import { RewriteResumeButton } from "./RewriteResumeButton";
 import { AtsScoreSection } from "./AtsScoreSection";
 import { JobLanguageSelect } from "./JobLanguageSelect";
 import { SendEmailButton } from "./SendEmailButton";
@@ -205,9 +205,10 @@ function JobDetails({
             jobId={job.id}
             existingContent={job.CoverLetter?.content}
           />
-          <TailoredSummarySection
+          <RewriteResumeButton
             jobId={job.id}
-            initialSummary={job.tailoredSummary}
+            language={job.language}
+            existingContent={job.RewrittenResume?.content}
           />
           <AtsScoreSection
             jobId={job.id}
@@ -286,10 +287,6 @@ function JobDetails({
       </div>
       {job.language && (
         <div className="flex justify-end gap-4 mt-1">
-          <TemplateAvailabilityNote
-            kind={TemplateKind.RESUME}
-            language={job.language}
-          />
           <TemplateAvailabilityNote
             kind={TemplateKind.COVER_LETTER}
             language={job.language}
