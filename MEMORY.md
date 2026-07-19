@@ -145,6 +145,38 @@ a past session's account was accurate.
     confirmed all 5 outputs correctly saved together on one Job row. Full
     detail in ARCHITECTURE.md's "'Generate All'" section.
 
+12. **Resume upload/extraction bug fix** (`feature/fix-resume-upload-extraction`)
+    — user reported an uploaded PDF resume showing as "27 characters,
+    essentially empty" for ATS scoring/AI generation. Root cause was **not**
+    missing PDF/DOCX extraction — that infrastructure (`src/lib/ai/import/
+    extract-text.ts`: `unpdf` for PDF, `mammoth` for DOCX, magic-byte
+    sniffing, decompression-bomb preflight, timeout) and the AI-structuring
+    pipeline (`/api/ai/resume/import` → `ResumeImportSchema` → review cards →
+    `resolveImportCard` writes `ContactInfo`/`ResumeSections`) already existed
+    and worked correctly. The actual bug: `ResumeContainer.tsx`'s "Structure
+    with AI" button was gated behind an `aiReady` flag that only became `true`
+    inside a `getUserSettings()` callback, and **only if** a `UserSettings`
+    row with a saved `ai` settings blob existed. A user who never opened AI
+    Settings (the default state — confirmed zero `UserSettings` rows for the
+    real account) never saw the button at all, so a plain file upload
+    (`/api/profile/resume` POST) just creates a title-only `Resume` row with
+    no `ContactInfo`/`ResumeSections` — `convertResumeToText` then produces
+    literally `# {title}` (~27 chars for this title), matching the report
+    exactly. Fixed by defaulting `aiReady` to `true` using `defaultModel`
+    (same pattern `AiResumeReviewSection`/`AiJobMatchSection` already use —
+    button always available, Ollama connectivity checked async, never gated
+    on a saved-settings row existing). Backfilled the two pre-existing empty
+    resumes via a temporary script running the real extraction+AI-structuring
+    pipeline against the real uploaded PDF (`llama3.2:3b`, ~760s and ~533s):
+    both now have real `ContactInfo` (name, real email), 3 work experiences,
+    2 education entries, 3 certifications, and skills — `preprocessResume`
+    output went from 27 chars to ~3,850 chars on both. Script + `server-only`
+    stub deleted after. **Not done**: raw extracted text is not persisted
+    anywhere — the AI-structuring step reformats it into schema fields, which
+    is fine for ATS/generation today, but a future "tailor using the user's
+    exact original wording" feature would need to either re-extract from the
+    file on demand or add a raw-text cache field; flagged, not built.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);

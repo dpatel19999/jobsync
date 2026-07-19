@@ -512,3 +512,15 @@ Format: Decision — Rationale
   `tailoredSummary`, `coverLetterId`→`CoverLetter.content`,
   `coldEmailId`→`ColdEmail.content`) with no clobbering between steps.
   Fixture rows cleaned up afterward.
+
+- **Resume upload bug fix**: `ResumeContainer.tsx`'s "Structure with AI"
+  button gated on `aiReady`, which only flipped true if a `UserSettings.ai`
+  row existed — silently unreachable for any user (including the real
+  account) who never saved AI Settings once. This is why uploaded resumes
+  stayed empty (`27`-char normalized text) even though PDF/DOCX extraction
+  and AI-structuring already worked end to end. Fixed by defaulting
+  `aiReady` to `true` off `defaultModel`, same as `AiResumeReviewSection`/
+  `AiJobMatchSection`. Decision: don't add a "raw text" storage field yet
+  for future verbatim-wording tailoring — re-extracting from the retained
+  uploaded file on demand is simpler and the file is never deleted out from
+  under a `Resume` row today.
