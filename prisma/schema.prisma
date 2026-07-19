@@ -344,6 +344,10 @@ model Job {
   // user-overridable from the job detail page. Null = not yet detected.
   language String?
 
+  // Recipient email for the Gmail-compose "Send Email" button (v1: compose-
+  // window only, no OAuth/Gmail API). Set from the Send Email dialog.
+  emailTo String?
+
   // MCP provenance: which agent/token created this job (null = UI or automation)
   createdVia      String?
 

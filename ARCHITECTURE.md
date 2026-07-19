@@ -319,3 +319,55 @@ vice versa).
   override persists and wins over the original JD text on a third call, and
   both real ATS scoring and a real live cold-email generation honored the
   override.
+
+## Send Email + Mark as Applied (done, merged to `main`)
+
+v1, deliberately lightweight: Gmail compose-window deep link only — no
+OAuth, no Gmail API, no token handling. Separate in scope from the future
+full-OAuth "Gmail integration" (see DECISIONS.md's "Gmail-integration
+security prep" — that entry applies only to a possible later version, not
+this one).
+
+- `Job.emailTo` — new nullable `String?` field, migration
+  `20260719112742_add_job_email_to`. Captured/edited directly from the Send
+  Email dialog (not added to the Add/Edit Job form) via `updateJobEmailTo`.
+- `src/lib/gmail-compose.ts` — pure, unit-tested URL builder:
+  `buildGmailComposeUrl({ to, subject, body })` returns
+  `https://mail.google.com/mail/?view=cm&to=...&su=...&body=...` using
+  `URLSearchParams`, which percent-encodes every field (including line
+  breaks as `%0A`, `&`/`=`/umlauts, etc.) correctly without any manual
+  `encodeURIComponent`. `buildDefaultEmailSubject(senderName, jobTitle)`
+  builds `Application — {name} — {title}`.
+- `SendEmailButton.tsx` (job detail page, next to the cold-email/ATS-score
+  buttons) — opens a dialog pre-filled from `job.emailTo`, a subject default
+  computed from `job.Resume.ContactInfo` (added to `getJobDetails`'s Resume
+  include) + `job.JobTitle`, and body pre-filled from
+  `job.ColdEmail?.content` if one's been generated. "Open in Gmail" builds
+  the URL, `window.open`s it in a new tab, and persists a changed recipient
+  via `updateJobEmailTo`.
+- `MarkAppliedButton.tsx` — standalone toggle backed by a new
+  `toggleJobApplied(jobId, applied)` action, independent of
+  `updateJobStatus`'s existing side effect of flipping `applied` when status
+  changes to "applied"/"interview". Optimistic UI update with
+  rollback-on-failure, same pattern as `JobLanguageSelect`.
+- **Verified via a real Playwright click-through** against a throwaway
+  fixture user/profile/resume/job in real `dev.db` (all fixture rows deleted
+  after): logged in as the fixture user, opened the job detail page, clicked
+  Send Email — the dialog was pre-filled with the exact expected
+  recipient/subject/body (subject computed from the fixture's real
+  firstName/lastName, body pulled from a real `ColdEmail.content` containing
+  actual line breaks and an `&`). Clicking "Open in Gmail" opened a real new
+  tab; since no Google account was signed into that browser, Google's own
+  gateway redirected to `accounts.google.com`'s real sign-in page, preserving
+  the entire original compose URL byte-for-byte in its `continue=` param —
+  decoding it confirmed `to`/`su`/`body` matched exactly, umlauts and line
+  breaks included. That is the honest ceiling of what's automatable without
+  real Google credentials: it proves Google's own servers received the
+  exact correct URL, not that Gmail's compose UI visually renders it.
+  Separately confirmed Mark as Applied against the real database (not just
+  the optimistic UI): the first attempt at asserting on the button's label
+  alone was a false positive (the label flips before the server round-trip
+  resolves), caught by checking `dev.db` directly afterward and finding
+  `applied` still `false`; fixed by waiting for the success toast (which
+  only fires after the awaited action resolves) before reading the DB, which
+  then correctly showed `applied: true` with a real `appliedDate`.

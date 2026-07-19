@@ -2,11 +2,21 @@
 
 ## Last updated
 Everything below is **committed and merged into `main`**. No feature
-branches exist right now — only `main`. `main` is **8 commits ahead of
-`origin/main`**, never pushed (no request to). Full test suite last
-confirmed passing except the known pre-existing `AddJob.spec.tsx`
-parallel-load flakiness (2 tests, isolated-run clean — see "Known,
-accepted flakiness" below).
+branches exist right now — only `main`. `main` is ahead of
+`origin/main`, never pushed (no request to). Targeted tests for the newest
+feature (below) confirmed passing; full suite not re-run this session per
+explicit instruction ("targeted tests only").
+
+**Important note on the previous session's chat-shift summary**: a later
+session was asked for a full audit of a supposed `feature/email-send`
+(emailTo field, Send Email button, Mark as Applied) and found **none of it
+had actually been built** — no branch, no code, no tests existed anywhere,
+despite a prior chat-shift summary implying otherwise. That branch/feature
+name never appeared in this file, DECISIONS.md, or ARCHITECTURE.md before
+that point. It has since been built fresh (see #8 below) — but if a future
+summary references work that isn't independently verifiable in the repo
+(git log, actual files), re-verify before trusting it rather than assuming
+a past session's account was accurate.
 
 ## What's shipped, in order
 1. **Cold email generation** (`feature/cold-email`) — non-streaming
@@ -61,6 +71,20 @@ accepted flakiness" below).
    → override → override-wins, through both real ATS scoring and a real
    live cold-email generation. Full detail in ARCHITECTURE.md's "Job
    language persistence" section.
+8. **Send Email + Mark as Applied** (`feature/email-send`) — v1, lightweight
+   by design: Gmail compose-window deep link only, no OAuth/Gmail API/token
+   handling (separate scope from the future full "Gmail integration" below).
+   `Job.emailTo` field, `src/lib/gmail-compose.ts` URL builder (unit-tested
+   for encoding correctness including line breaks/umlauts/`&`),
+   `SendEmailButton.tsx` + `MarkAppliedButton.tsx` on the job detail page,
+   standalone `toggleJobApplied` action separate from the status-dropdown's
+   existing applied side effect. Verified via a real Playwright
+   click-through against a throwaway fixture (deleted after): dialog
+   pre-fill, exact recipient/subject/body recovered from Google's own
+   sign-in redirect `continue=` param, and Mark as Applied confirmed against
+   real `dev.db` (not just the optimistic UI — see ARCHITECTURE.md for a
+   false-positive this caught and fixed). Full detail in ARCHITECTURE.md's
+   "Send Email + Mark as Applied" section.
 
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
@@ -70,24 +94,26 @@ changes. Not modified — don't "fix" this without re-confirming it's still
 just load-related.
 
 ## Immediate next steps
-1. **Gmail integration is next.** Read DECISIONS.md's "Gmail-integration
-   security prep" entry *before* designing anything — it has concrete
-   requirements (encrypt tokens like the existing `ApiKey` pattern, minimal
-   scopes, OAuth `state` validation, fence all email content through the
-   prompt-fencing module from day one, login rate limiting becomes
-   non-theoretical once real tokens exist).
-2. `main` is 8 commits ahead of `origin/main` — push only if/when asked.
+1. **Full-OAuth Gmail integration is next** (auto-tracking, not the compose
+   link built in #8). Read DECISIONS.md's "Gmail-integration security prep"
+   entry *before* designing anything — it has concrete requirements (encrypt
+   tokens like the existing `ApiKey` pattern, minimal scopes, OAuth `state`
+   validation, fence all email content through the prompt-fencing module
+   from day one, login rate limiting becomes non-theoretical once real
+   tokens exist).
+2. `main` is ahead of `origin/main` — push only if/when asked.
 3. Two flagged-but-unresolved local-model limitations remain open (see
    items 3 and 4 above) — revisit if real usage shows either is too noisy,
    not proactively.
 
 ## Full feature list agreed (see ARCHITECTURE.md for technical detail)
-Gmail auto-tracking (confirm-on-downgrade) — next up. EN+DE ATS scoring ✅,
-cold email ✅, writing guardrails ✅, DIN 5008 + German B1 ✅, job-language
-persistence ✅, security hardening ✅. Still not started: CV+cover
-letter+cold email tailoring (docx+pdf output), JD-adaptive CV structure,
-company-mismatch guardrail, recruiter-persona weighted scoring, interview
-prep Q&A module, LinkedIn networking assistant (manual-send only).
+Gmail auto-tracking (confirm-on-downgrade, full OAuth) — next up. EN+DE ATS
+scoring ✅, cold email ✅, writing guardrails ✅, DIN 5008 + German B1 ✅,
+job-language persistence ✅, security hardening ✅, Send Email (compose-link
+v1) + Mark as Applied ✅. Still not started: CV+cover letter+cold email
+tailoring (docx+pdf output), JD-adaptive CV structure, company-mismatch
+guardrail, recruiter-persona weighted scoring, interview prep Q&A module,
+LinkedIn networking assistant (manual-send only).
 
 ## Corrections to keep in mind
 - `coverLetter.actions.ts` has **no AI generation** for the cover-letter CRUD

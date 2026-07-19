@@ -60,6 +60,8 @@ import { toast } from "../ui/use-toast";
 import { GenerateColdEmailButton } from "./GenerateColdEmailButton";
 import { AtsScoreSection } from "./AtsScoreSection";
 import { JobLanguageSelect } from "./JobLanguageSelect";
+import { SendEmailButton } from "./SendEmailButton";
+import { MarkAppliedButton } from "./MarkAppliedButton";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -199,6 +201,18 @@ function JobDetails({
             initialScore={job.atsScore}
             initialScoreData={job.atsScoreData}
           />
+          <SendEmailButton
+            jobId={job.id}
+            jobTitle={job.JobTitle?.label}
+            senderName={
+              job.Resume?.ContactInfo
+                ? `${job.Resume.ContactInfo.firstName} ${job.Resume.ContactInfo.lastName}`.trim()
+                : null
+            }
+            initialEmailTo={job.emailTo}
+            initialBody={job.ColdEmail?.content}
+          />
+          <MarkAppliedButton jobId={job.id} initialApplied={job.applied} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
