@@ -4,7 +4,10 @@
 Everything below is **committed and merged into `main`**. No feature
 branches exist right now — only `main`. `main` is ahead of
 `origin/main`, never pushed (no request to). Full suite re-run this session
-after adding master-template storage: 107/107 files, 1391/1391 tests passing.
+after adding position-locked resume rewrite: 108/109 files, 1412/1415 tests
+passing (the 3 failures are `AddJob.spec.tsx`'s known pre-existing
+full-suite-parallel-load flakiness — 17/17 pass in isolation, confirmed
+unrelated to this session's changes, see "Known, accepted flakiness" below).
 
 **Recurring verification note**: `getCurrentUser()` (via next-auth's
 `auth()`) needs a real Next.js request context — it always fails when a
@@ -326,6 +329,43 @@ a past session's account was accurate.
     empty-state → found-state, all confirmed, fixtures cleaned up). Full
     detail in ARCHITECTURE.md's "Master templates" section.
 
+18. **Position-locked resume rewrite** (`feature/resume-rewrite`) — replaces
+    the old "Tailor Resume Summary" button. New `RewrittenResume` model,
+    `rewriteResume(profileId, jobId)` in `src/actions/resumeRewrite.actions.ts`
+    reads `MasterTemplate.extractedText` for the job's language (not the
+    structured `Resume` model), runs it through the unchanged guardrail
+    pipeline (`generateVerifiedContent`: factual-accuracy + writing-tells),
+    plus a new soft `checkPositionLock` post-check
+    (`src/lib/ai/guardrails/position-lock.ts`) that compares non-empty-line
+    counts between the template and the rewrite and appends a warning (not
+    a block) on mismatch. If no matching template exists, fails with a
+    clear message before attempting generation; `RewriteResumeButton.tsx`
+    proactively shows `TemplateAvailabilityNote`'s missing-state instead of
+    an offer-to-fail button. `Job.tailoredSummary`/`generateTailoredSummary`
+    kept but unwired from the UI (data not destroyed). `GenerateAllButton`'s
+    step 3 now calls `rewriteResume` instead.
+    **Real E2E result, important and honest**: ran for real against a real
+    German-language PDF resume and a real pre-existing tracked job (Goldwind,
+    `language: "de"`), real Gemini. Guardrail pipeline worked correctly
+    (`verified: true`, German B1 soft-check correctly flagged one long
+    sentence, non-blocking). Position-lock, first run: 87 template lines vs.
+    66 rewritten — a real 24% structural drift, model had rejoined
+    PDF-line-wrapped bullets into denser lines. Added an explicit
+    "hit exactly N lines" instruction to the prompt (one round of tightening,
+    same precedent as the existing B1/factual-accuracy guardrails) — improved
+    to 87 vs. 86 on the next real run. **Still not exact** — flagged as a
+    real, reproducible small-model-compliance gap (this time on Gemini
+    Flash-Lite, a cloud model, not just the local one), not chased further
+    this pass; the guardrail correctly surfaces it as a warning rather than
+    silently accepting drift. **Not built, explicitly flagged per the task's
+    own instructions**: no `.docx` file output — `RewrittenResume.content`
+    is plain text in a read-only dialog; the agreed
+    `Dhruvil_Akbari_{CompanyName}_Resume` naming is already used for the
+    saved title, but actual file generation (and whether to reconstruct the
+    template's original visual formatting) is a separate, bigger task.
+    Full detail in ARCHITECTURE.md's "Position-locked resume rewrite"
+    section.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);
@@ -334,38 +374,53 @@ changes. Not modified — don't "fix" this without re-confirming it's still
 just load-related.
 
 ## Immediate next steps
-1. **Master-template *generation* is the natural next step for item #17** —
-   storage/upload/empty-state exist, but nothing reads `MasterTemplate.
-   extractedText` back out yet. A future pass would wire it into
-   `generateCoverLetter`/tailored-summary as the source wording instead of
-   (or alongside) the resume's structured `ResumeSection`s.
-2. **Full-OAuth Gmail integration** (auto-tracking, not the compose link
+1. **DOCX file export for the rewritten resume** — item #18 saves plain text
+   only; a real downloadable `.docx` at `Dhruvil_Akbari_{CompanyName}_
+   Resume.docx` needs a design decision first (reconstruct the original
+   template's visual formatting vs. a clean new layout) before picking a
+   library/approach.
+2. **Cover letter generation could similarly read from `MasterTemplate`**
+   (Cover Letter EN/DE slots exist and are uploadable, but
+   `generateCoverLetter` still reads the structured `Resume` model, not a
+   cover-letter template) — not requested yet, but a natural parallel to
+   item #18 if asked.
+3. **Full-OAuth Gmail integration** (auto-tracking, not the compose link
    built in #8). Read DECISIONS.md's "Gmail-integration security prep"
    entry *before* designing anything — it has concrete requirements (encrypt
    tokens like the existing `ApiKey` pattern, minimal scopes, OAuth `state`
    validation, fence all email content through the prompt-fencing module
    from day one, login rate limiting becomes non-theoretical once real
    tokens exist).
-3. `main` is ahead of `origin/main` — push only if/when asked.
-4. Two flagged-but-unresolved local-model limitations remain open (see
-   items 3 and 4 above) — revisit if real usage shows either is too noisy,
-   not proactively.
+4. `main` is ahead of `origin/main` — push only if/when asked.
+5. Flagged-but-unresolved model-compliance limitations remain open (German
+   B1/Konjunktiv II, factual-accuracy false positives, and now resume-rewrite
+   position-lock drift — see item #18) — revisit if real usage shows any of
+   these is too noisy, not proactively.
 
 ## Full feature list agreed (see ARCHITECTURE.md for technical detail)
 Gmail auto-tracking (confirm-on-downgrade, full OAuth) — next up. EN+DE ATS
 scoring ✅, cold email ✅, writing guardrails ✅, DIN 5008 + German B1 ✅,
 job-language persistence ✅, security hardening ✅, Send Email (compose-link
-v1) + Mark as Applied ✅, cover letter generation ✅, resume-tailoring
-summary ✅. Still not started: docx/pdf CV export, JD-adaptive CV structure,
-company-mismatch guardrail, recruiter-persona weighted scoring, interview
-prep Q&A module, LinkedIn networking assistant (manual-send only).
+v1) + Mark as Applied ✅, cover letter generation ✅, master template
+storage ✅, position-locked resume rewrite ✅ (supersedes the old
+resume-tailoring summary). Still not started: docx/pdf CV export (for the
+resume rewrite output), JD-adaptive CV structure, company-mismatch
+guardrail, recruiter-persona weighted scoring, interview prep Q&A module,
+LinkedIn networking assistant (manual-send only).
 
 ## Corrections to keep in mind
-- `coverLetter.actions.ts` now has **three AI-generation functions**
+- `coverLetter.actions.ts` has **three AI-generation functions**
   (`generateColdEmail`, `generateCoverLetter`, `generateTailoredSummary`)
   alongside the original manual CRUD — if you see an old note claiming this
-  file has no AI generation, that's stale.
+  file has no AI generation, that's stale. `generateTailoredSummary` is
+  itself now stale/UI-unwired (superseded by `resumeRewrite.actions.ts`'s
+  `rewriteResume`) but still present in the file — don't assume dead code
+  here means a regression, it was a deliberate keep-the-data choice.
 - Language is now a **persisted per-job field** (`Job.language`), not
   fresh-detected per call — if you see code still calling `detectAtsLanguage`
   directly from an action (rather than through `resolveJobLanguage`), that's
   a regression, not the current design.
+- The "Tailor Resume Summary" button/section (`TailoredSummarySection.tsx`)
+  no longer exists — it's `RewriteResumeButton.tsx` now, reading from
+  `MasterTemplate` (Settings → Templates) rather than the structured
+  `Resume` model. If you see a note referencing the old button, that's stale.

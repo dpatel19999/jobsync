@@ -566,3 +566,102 @@ and deterministically for regression coverage going forward.
 `extractedText` back out for actual generation — no cover-letter/resume
 draft today pulls from a `MasterTemplate` row. That's the natural next step
 once this storage layer exists.
+
+## Position-locked resume rewrite (done, branch `feature/resume-rewrite`)
+
+Replaces the old "Tailor Resume Summary" button/flow. Reads the master
+template's `extractedText` (see above), not the structured
+`Resume`/`ResumeSection` model — the AI may only reword existing wording,
+never reorder or invent sections.
+
+- `RewrittenResume` Prisma model (migration `20260719200941_add_rewritten_
+  resume`), same shape as `CoverLetter`/`ColdEmail` (`profileId`, `title`,
+  `content`, timestamps), linked via `Job.rewrittenResumeId`. `Job.
+  tailoredSummary` and `generateTailoredSummary` (`coverLetter.actions.ts`)
+  are **kept, unwired from the UI** — not deleted — so a user's previously
+  generated summaries aren't destroyed by this change; nothing calls that
+  action anymore.
+- `src/lib/ai/guardrails/position-lock.ts` — `checkPositionLock(original,
+  rewritten)`, a soft/advisory heuristic post-check (same category as
+  `detectWritingTells`/`detectGermanB1Violations`, not a second AI call):
+  splits both texts into non-empty lines and compares counts.
+  **Line-based, not blank-line-paragraph-based** — real PDF/DOCX extraction
+  (confirmed against a real extracted PDF) does not reliably produce blank
+  lines between resume sections at all; a blank-line "block" heuristic tried
+  first during verification showed 1 block vs 14, a false signal. Also
+  exports `countNonEmptyLines()`, used by the prompt builders to tell the
+  model the exact required line count up front (see below).
+- `src/lib/ai/prompts/resume-rewrite/` (EN + DE `system`/`user` pairs) —
+  system prompt frames the model as "a copy editor, not an author": may
+  reword, may not add/remove/reorder. User prompt states the template's
+  exact non-empty line count and instructs the model to hit that number
+  exactly, plus an explicit warning not to rejoin/reflow PDF-wrapped lines
+  into fewer, denser ones (the real failure mode found during verification
+  — see below). DE path reuses `GERMAN_B1_LANGUAGE_RULES`/
+  `GERMAN_WRITING_TELL_RULES`, not `DIN_5008_EMAIL_STRUCTURE` (a resume
+  isn't a letter/email).
+- `src/actions/resumeRewrite.actions.ts` — `rewriteResume(profileId,
+  jobId)`: same shape as `generateCoverLetter`/`generateTailoredSummary`
+  (rate limit, `resolveJobLanguage`, `callWithGeminiFallback`,
+  `generateVerifiedContent` — the shared guardrail pipeline, unchanged),
+  except the "resume text" source is `MasterTemplate.extractedText` for the
+  job's language (via `templateSlotFor(RESUME, language)`), not a resolved
+  `Resume` row. If no matching template exists, fails with a clear message
+  ("No German resume template uploaded yet...") **before** attempting
+  generation — same message text `TemplateAvailabilityNote` shows. After
+  generation, runs `checkPositionLock` against the *actually-sent* (i.e.
+  post-`truncateForProvider`) template text, not the raw stored template —
+  the model can only preserve lines it actually received. A mismatch
+  appends a warning (combined with any factual-accuracy warning) rather
+  than blocking, matching every other soft guardrail in this codebase.
+  `truncateForProvider` gained a new `"RESUME_REWRITE"` kind with a much
+  larger budget than the existing `"RESUME"` kind (`TEXT_LIMITS` in
+  `config.ts`: Ollama 6,000 / Cloud 20,000 vs. 1,500 / 4,000) — truncating a
+  full resume down to a highlights-sized excerpt would itself violate
+  "don't remove content" before the model even runs.
+- Output title follows the agreed naming convention:
+  `Dhruvil_Akbari_{CompanyName}_Resume` (sanitized company name). **Not
+  built**: an actual downloadable `.docx` file at that filename, with or
+  without the original template's visual formatting reconstructed — flagged
+  per the task's own instruction rather than guessed at. Today's output is
+  plain rewritten text in a read-only dialog (same UX pattern as
+  `GenerateCoverLetterButton`), stored as `RewrittenResume.content`. Real
+  DOCX generation (and the harder question of whether to reconstruct the
+  original template's visual formatting or produce a clean new layout) is a
+  separate, not-yet-scoped task.
+- UI: `RewriteResumeButton.tsx` replaces `TailoredSummarySection.tsx`
+  (deleted). Checks template availability itself on mount/language-change
+  (`getTemplateForJobLanguage`); if the job's language is known and no
+  template exists, renders `TemplateAvailabilityNote` (missing-state) in
+  place of the button instead of offering a button that can only fail —
+  satisfies "don't silently fall back to the wrong language." The generic
+  `TemplateAvailabilityNote` row on the job detail page now only shows the
+  Cover Letter one; the Resume one moved into this button. `GenerateAll
+  Button.tsx`'s step 3 (`generateTailoredSummary`, run in `Promise.all` with
+  step 4's `generateCoverLetter`) is now `rewriteResume`, same concurrency.
+- **Verified via a real, temporary script** (`scripts/verify-resume-
+  rewrite.ts`, deleted after use) against real Prisma, a real German-language
+  PDF resume (the same one backfilled in the resume-upload-bug-fix item —
+  confirmed to genuinely be German content, "AUSBILDUNG"/"BERUFSERFAHRUNG"
+  headers etc.), a real pre-existing tracked job (Goldwind, `language: "de"`
+  already persisted), and real Gemini (`gemini-flash-lite-latest`). Full
+  guardrail pipeline ran for real: `generateVerifiedContent` returned
+  `verified: true` on the first attempt (no fabricated claims), and the
+  German B1 soft-check correctly fired a non-blocking warning for one
+  over-length sentence — guardrails working exactly as designed, nothing
+  new here. **Position-lock, honest result**: the *first* real run (before
+  the exact-line-count prompt addition) showed real, significant drift —
+  87 template lines vs. 66 rewritten (a 24% reduction, the model had
+  rejoined several PDF-line-wrapped bullets into denser lines). Adding the
+  explicit "the input has exactly N lines, hit N exactly" instruction (one
+  round of prompt tightening, matching the precedent already set for the
+  factual-accuracy/B1 guardrails elsewhere in this codebase) improved this
+  to 87 vs. 86 — a single line off, not zero. **This is a real, reproducible
+  small-model-compliance gap, not a code defect** — same category as the
+  already-documented German-B1/Konjunktiv-II and factual-accuracy-false-
+  positive limitations. The guardrail correctly caught and flagged even
+  this small residual mismatch rather than silently accepting it, which is
+  the entire point of having it as a post-check rather than trusting the
+  prompt alone. Not chased further this pass (see DECISIONS.md) — matches
+  this codebase's established practice of one tightening pass, then
+  document and revisit only if real usage shows it's too noisy.

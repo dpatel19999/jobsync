@@ -637,3 +637,80 @@ Format: Decision — Rationale
   per-provider budget on each attempt, including the fallback — Ollama's
   smaller context budget is respected even mid-fallback, not just on a
   native Ollama call.
+
+- **`feature/resume-rewrite`: `Job.tailoredSummary`/`generateTailoredSummary`
+  kept in the schema/codebase, just unwired from the UI** — the task said
+  "replace the button," not "delete the data." Dropping the column would
+  destroy real, already-generated values for existing tracked jobs with no
+  migration path requested; simplest safe choice was to stop calling the
+  action from anywhere rather than delete it.
+- **Position-lock check is line-based, not blank-line/paragraph-based** —
+  the first implementation split text on blank lines (mirroring how a human
+  reads "sections"), but real PDF text extraction (verified against a real
+  extracted PDF this session) does not reliably produce blank lines between
+  resume sections at all — the whole document came back as one continuous
+  block by that definition. Switched to counting non-empty lines, which
+  matches the actual granularity of extracted text (one heading/fact/bullet
+  per line). Caught by insisting on a *real* E2E run before declaring this
+  done, not a synthetic/mocked test — the mocked unit tests couldn't have
+  surfaced this, since they control both sides of the comparison.
+- **Prompt builders (`buildResumeRewritePrompt`/`buildResumeRewritePromptDe`)
+  tell the model the exact required line count up front**
+  (`countNonEmptyLines()`, exported from the position-lock guardrail module
+  specifically so prompts and the post-check share one counting
+  implementation) — a concrete number ("hit exactly 87") is a stronger,
+  more checkable instruction than an abstract "preserve the structure"
+  rule. Added after the first real E2E run showed the abstract instruction
+  alone let the model condense 87 template lines down to 66 (it had
+  rejoined PDF-line-wrapped bullets into denser lines); the concrete-count
+  version narrowed that to 87 vs. 86 on the next real run. One round of
+  prompt tightening, matching the existing precedent for the factual-
+  accuracy and German-B1 guardrails elsewhere in this codebase — not chased
+  further this pass.
+- **FLAGGED FOR REVIEW: even with an explicit exact-line-count instruction,
+  Gemini Flash-Lite did not hit the line count exactly on a real run (87 vs.
+  86)** — a small, real, reproducible model-compliance gap, same category as
+  the already-documented German-B1/Konjunktiv-II and factual-accuracy
+  false-positive limitations (a cloud model this time, not just the local
+  8B one — so this isn't purely a "small local model" issue). Mitigated the
+  same way as every other guardrail in this codebase: `checkPositionLock`
+  runs as a soft/advisory post-check and appends a warning
+  (`result.warning`) rather than blocking or discarding the output — the
+  guardrail's job is to make drift visible, not to guarantee zero drift.
+  Revisit only if real usage shows this is too frequent/severe to be useful
+  as a warning (e.g. a semantic-unit-based check — splitting on bullet
+  markers/section headers instead of raw lines — would be more robust but
+  is a meaningfully bigger undertaking, not attempted this pass).
+- **`truncateForProvider` gained a `"RESUME_REWRITE"` kind with a much
+  larger character budget than the existing `"RESUME"` kind** (Ollama
+  1,500→6,000, Cloud 4,000→20,000 chars) — the existing `"RESUME"` budget
+  was sized for a highlights-style prompt (tailored summary, cover letter),
+  where losing the tail of a long resume to truncation is an acceptable
+  quality tradeoff. For resume rewrite, truncating the source template
+  would itself violate the position-lock "don't remove content" requirement
+  before the model even runs, so it needed a materially more generous cap.
+  `checkPositionLock` compares against the text actually sent to the model
+  (post-truncation), not the raw stored template, for the same reason
+  `callWithGeminiFallback`'s per-attempt truncation exists — the model can
+  only be judged against what it actually received.
+- **No `.docx` file output this pass — flagged, not built.** The task's own
+  instructions explicitly allowed this ("flag if [DOCX reconstruction] is a
+  bigger separate task rather than guessing"). Building a real downloadable
+  file at the agreed `Dhruvil_Akbari_{CompanyName}_Resume.docx` naming
+  convention raises a real design question not yet answered — reconstruct
+  the original template's visual formatting (fonts, layout, margins) inside
+  the generated docx, or produce a clean new layout from the rewritten
+  text — either is a meaningfully bigger task than this pass's scope
+  (storage + guardrails + UI). `RewrittenResume.title` already follows the
+  agreed naming convention today, so the filename question is pre-answered
+  whenever the file-generation task is picked up; only the file itself is
+  outstanding.
+- **Real E2E verification reused a genuine pre-existing tracked job**
+  (Goldwind, `language: "de"` already persisted from an earlier session)
+  rather than creating a synthetic fixture job — avoided the overhead of
+  constructing valid `JobTitle`/`Company`/`JobStatus` fixture rows just to
+  get a job to test against, and this job's resume/company/description are
+  all genuinely representative of real usage. Only the fixture
+  `MasterTemplate` row and the `RewrittenResume` it produced were created
+  and cleaned up; the real job itself was only touched via its
+  `rewrittenResumeId` (set, then reset to null), never deleted.
