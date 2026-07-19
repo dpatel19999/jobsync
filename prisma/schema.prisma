@@ -37,6 +37,7 @@ model User {
   McpAccessToken McpAccessToken[]
   defaultResumeId String?
   defaultResume   Resume?          @relation("UserDefaultResume", fields: [defaultResumeId], references: [id], onDelete: SetNull)
+  MasterTemplate  MasterTemplate[]
 }
 
 model ApiKey {
@@ -361,6 +362,27 @@ model Job {
   // Also has a hand-written partial unique index (not expressible here):
   // UNIQUE(userId, jobUrl) WHERE automationId IS NOT NULL
   // See migrations/20260710000002_job_automation_url_unique
+}
+
+// Master resume/cover-letter templates the user imports once and reuses as
+// the source-of-truth wording for future tailored generation (extraction
+// only today — no AI rewriting happens at import time). Four slots: resume
+// EN/DE, cover letter EN/DE. Uploading a new file for a slot keeps the prior
+// version (isCurrent: false) rather than deleting it.
+model MasterTemplate {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  slot          String   // "RESUME_EN" | "RESUME_DE" | "COVER_LETTER_EN" | "COVER_LETTER_DE"
+  version       Int
+  isCurrent     Boolean  @default(true)
+  fileName      String
+  filePath      String
+  extractedText String
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, slot, version])
+  @@index([userId, slot, isCurrent])
 }
 
 model JobKeyword {

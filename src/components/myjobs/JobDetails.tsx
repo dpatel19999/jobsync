@@ -65,6 +65,8 @@ import { AtsScoreSection } from "./AtsScoreSection";
 import { JobLanguageSelect } from "./JobLanguageSelect";
 import { SendEmailButton } from "./SendEmailButton";
 import { MarkAppliedButton } from "./MarkAppliedButton";
+import { TemplateAvailabilityNote } from "./TemplateAvailabilityNote";
+import { TemplateKind } from "@/models/template.model";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -282,6 +284,18 @@ function JobDetails({
           </DropdownMenu>
         </div>
       </div>
+      {job.language && (
+        <div className="flex justify-end gap-4 mt-1">
+          <TemplateAvailabilityNote
+            kind={TemplateKind.RESUME}
+            language={job.language}
+          />
+          <TemplateAvailabilityNote
+            kind={TemplateKind.COVER_LETTER}
+            language={job.language}
+          />
+        </div>
+      )}
       {job?.id && (
         <Card className="col-span-3">
           <CardHeader className="flex-row items-center justify-between relative">

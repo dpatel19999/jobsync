@@ -114,6 +114,15 @@ export const APP_CONSTANTS = {
   RESUME_IMPORT_MAX_DOCX_UNCOMPRESSED_BYTES: 100 * 1024 * 1024, // 100 MB
   RESUME_IMPORT_EXTRACT_TIMEOUT_MS: 30_000, // 30 seconds
 
+  // Master template uploads (resume/cover-letter, EN/DE) — same file-type
+  // constraints as resume upload, kept as separate constants so the two
+  // upload paths can be tuned independently later.
+  MAX_TEMPLATE_FILE_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB
+  TEMPLATE_ALLOWED_MIME_TYPES: [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ] as const,
+
   // ATS keyword scoring — local computation (no AI call), but the German
   // adapter lazily loads a ~1MB Hunspell wordlist on first use; a hard
   // timeout keeps a hung load from blocking the UI or spiking CPU instead of
