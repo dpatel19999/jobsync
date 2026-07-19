@@ -4,7 +4,6 @@ import { handleError } from "@/lib/utils";
 import { getCurrentUser } from "@/utils/user.utils";
 import { APP_CONSTANTS } from "@/lib/constants";
 import {
-  getModel,
   preprocessResume,
   preprocessJob,
   COLD_EMAIL_SYSTEM_PROMPT,
@@ -21,7 +20,7 @@ import {
   buildTailoredSummaryPromptDe,
   generateVerifiedContent,
   checkRateLimit,
-  resolveDefaultAi,
+  callWithGeminiFallback,
 } from "@/lib/ai";
 import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
@@ -253,9 +252,6 @@ export const generateColdEmail = async (
       throw new Error(jobPre.error.message);
     }
 
-    const ai = await resolveDefaultAi(user.id);
-    const model = await getModel(ai.provider, ai.model, user.id);
-
     const companyName = job.Company?.label ?? "the company";
 
     // Reuses the persisted Job.language field if already set (by a prior
@@ -267,25 +263,28 @@ export const generateColdEmail = async (
       jobPre.data.normalizedText,
     );
 
-    // TEXT_LIMITS existed but was never wired in anywhere — long resumes/JDs
-    // were going to the model uncapped. Truncate here, provider-aware.
-    const resumeText = truncateForProvider(resumePre.data.normalizedText, ai.provider, "RESUME");
-    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
-
-    const { content, warning } = await generateVerifiedContent({
-      model,
-      system: language === "de" ? COLD_EMAIL_SYSTEM_PROMPT_DE : COLD_EMAIL_SYSTEM_PROMPT,
-      prompt:
-        language === "de"
-          ? buildColdEmailPromptDe(resumeText, jobText, companyName)
-          : buildColdEmailPrompt(resumeText, jobText, companyName),
-      temperature: TEMPERATURES.FEEDBACK,
-      facts: {
-        resumeText,
-        jobText,
+    const { result: { content, warning }, usedOfflineFallback } = await callWithGeminiFallback(
+      user.id,
+      async (model, provider) => {
+        // TEXT_LIMITS existed but was never wired in anywhere — long
+        // resumes/JDs were going to the model uncapped. Truncate here,
+        // provider-aware (re-evaluated per attempt so a Gemini-quota
+        // fallback to Ollama uses Ollama's smaller budget, not Gemini's).
+        const resumeText = truncateForProvider(resumePre.data.normalizedText, provider, "RESUME");
+        const jobText = truncateForProvider(jobPre.data.normalizedText, provider, "JOB");
+        return generateVerifiedContent({
+          model,
+          system: language === "de" ? COLD_EMAIL_SYSTEM_PROMPT_DE : COLD_EMAIL_SYSTEM_PROMPT,
+          prompt:
+            language === "de"
+              ? buildColdEmailPromptDe(resumeText, jobText, companyName)
+              : buildColdEmailPrompt(resumeText, jobText, companyName),
+          temperature: TEMPERATURES.FEEDBACK,
+          facts: { resumeText, jobText },
+          language,
+        });
       },
-      language,
-    });
+    );
 
     const title = `${companyName} - ${job.JobTitle?.label ?? "Cold Email"}`;
 
@@ -298,7 +297,7 @@ export const generateColdEmail = async (
       data: { coldEmailId: coldEmail.id },
     });
 
-    return { success: true, data: coldEmail, content, warning };
+    return { success: true, data: coldEmail, content, warning, usedOfflineFallback };
   } catch (error) {
     const msg = "Failed to generate cold email.";
     return handleError(error, msg);
@@ -379,9 +378,6 @@ export const generateCoverLetter = async (
       throw new Error(jobPre.error.message);
     }
 
-    const ai = await resolveDefaultAi(user.id);
-    const model = await getModel(ai.provider, ai.model, user.id);
-
     const companyName = job.Company?.label ?? "the company";
 
     const language = await resolveJobLanguage(
@@ -390,23 +386,24 @@ export const generateCoverLetter = async (
       jobPre.data.normalizedText,
     );
 
-    const resumeText = truncateForProvider(resumePre.data.normalizedText, ai.provider, "RESUME");
-    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
-
-    const { content, warning } = await generateVerifiedContent({
-      model,
-      system: language === "de" ? COVER_LETTER_SYSTEM_PROMPT_DE : COVER_LETTER_SYSTEM_PROMPT,
-      prompt:
-        language === "de"
-          ? buildCoverLetterPromptDe(resumeText, jobText, companyName)
-          : buildCoverLetterPrompt(resumeText, jobText, companyName),
-      temperature: TEMPERATURES.FEEDBACK,
-      facts: {
-        resumeText,
-        jobText,
+    const { result: { content, warning }, usedOfflineFallback } = await callWithGeminiFallback(
+      user.id,
+      async (model, provider) => {
+        const resumeText = truncateForProvider(resumePre.data.normalizedText, provider, "RESUME");
+        const jobText = truncateForProvider(jobPre.data.normalizedText, provider, "JOB");
+        return generateVerifiedContent({
+          model,
+          system: language === "de" ? COVER_LETTER_SYSTEM_PROMPT_DE : COVER_LETTER_SYSTEM_PROMPT,
+          prompt:
+            language === "de"
+              ? buildCoverLetterPromptDe(resumeText, jobText, companyName)
+              : buildCoverLetterPrompt(resumeText, jobText, companyName),
+          temperature: TEMPERATURES.FEEDBACK,
+          facts: { resumeText, jobText },
+          language,
+        });
       },
-      language,
-    });
+    );
 
     const title = `${companyName} - ${job.JobTitle?.label ?? "Cover Letter"}`;
 
@@ -419,7 +416,7 @@ export const generateCoverLetter = async (
       data: { coverLetterId: coverLetter.id },
     });
 
-    return { success: true, data: coverLetter, content, warning };
+    return { success: true, data: coverLetter, content, warning, usedOfflineFallback };
   } catch (error) {
     const msg = "Failed to generate cover letter.";
     return handleError(error, msg);
@@ -501,39 +498,37 @@ export const generateTailoredSummary = async (
       throw new Error(jobPre.error.message);
     }
 
-    const ai = await resolveDefaultAi(user.id);
-    const model = await getModel(ai.provider, ai.model, user.id);
-
     const language = await resolveJobLanguage(
       user.id,
       job,
       jobPre.data.normalizedText,
     );
 
-    const resumeText = truncateForProvider(resumePre.data.normalizedText, ai.provider, "RESUME");
-    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
-
-    const { content, warning } = await generateVerifiedContent({
-      model,
-      system: language === "de" ? TAILORED_SUMMARY_SYSTEM_PROMPT_DE : TAILORED_SUMMARY_SYSTEM_PROMPT,
-      prompt:
-        language === "de"
-          ? buildTailoredSummaryPromptDe(resumeText, jobText)
-          : buildTailoredSummaryPrompt(resumeText, jobText),
-      temperature: TEMPERATURES.FEEDBACK,
-      facts: {
-        resumeText,
-        jobText,
+    const { result: { content, warning }, usedOfflineFallback } = await callWithGeminiFallback(
+      user.id,
+      async (model, provider) => {
+        const resumeText = truncateForProvider(resumePre.data.normalizedText, provider, "RESUME");
+        const jobText = truncateForProvider(jobPre.data.normalizedText, provider, "JOB");
+        return generateVerifiedContent({
+          model,
+          system: language === "de" ? TAILORED_SUMMARY_SYSTEM_PROMPT_DE : TAILORED_SUMMARY_SYSTEM_PROMPT,
+          prompt:
+            language === "de"
+              ? buildTailoredSummaryPromptDe(resumeText, jobText)
+              : buildTailoredSummaryPrompt(resumeText, jobText),
+          temperature: TEMPERATURES.FEEDBACK,
+          facts: { resumeText, jobText },
+          language,
+        });
       },
-      language,
-    });
+    );
 
     await prisma.job.update({
       where: { id: jobId, userId: user.id },
       data: { tailoredSummary: content },
     });
 
-    return { success: true, content, warning };
+    return { success: true, content, warning, usedOfflineFallback };
   } catch (error) {
     const msg = "Failed to generate tailored resume summary.";
     return handleError(error, msg);

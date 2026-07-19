@@ -101,6 +101,29 @@ describe("GenerateAllButton", () => {
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "success" }));
   });
 
+  it("shows a non-blocking offline-mode note when a step's result reports usedOfflineFallback, and mentions it in the final toast", async () => {
+    mockAllSucceed();
+    mockExtractJobKeywords.mockResolvedValue({ success: true, data: [], usedOfflineFallback: true });
+    const user = userEvent.setup();
+    render(<GenerateAllButton jobId="job-1" hasColdEmail={false} />);
+
+    await user.click(screen.getByRole("button", { name: /generate all/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("generate-all-headline")).toHaveTextContent(
+        "All steps completed.",
+      );
+    });
+
+    expect(screen.getAllByText(/using offline mode.*gemini quota reached/i).length).toBeGreaterThan(0);
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variant: "success",
+        description: expect.stringMatching(/using offline mode.*gemini quota reached/i),
+      }),
+    );
+  });
+
   it("skips the cold email step (does not call generateColdEmail) when hasColdEmail is true", async () => {
     mockAllSucceed();
     const user = userEvent.setup();

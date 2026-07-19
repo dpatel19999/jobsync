@@ -65,17 +65,26 @@ export const TEXT_LIMITS = {
 export const DEFAULT_OLLAMA_MODEL = "llama3.2:3b";
 
 /**
- * Fallback Gemini model for cover letter + tailored summary generation when
- * the user hasn't explicitly picked a provider in AI Settings (Ollama stays
- * available there as an offline/no-cloud override). "gemini-2.5-flash" was
- * the originally requested model but returns 404 "no longer available to
- * new users" on this account's API key (verified live 2026-07-19); the
- * 2.0-flash models return 429 quota-exceeded on the same key.
- * "gemini-flash-latest" is the fastest model confirmed actually working
- * end-to-end (~1-2s for a short prompt) — use that alias so it keeps
- * pointing at Google's current fast-tier model without another manual swap.
+ * Fallback Gemini model for cover letter + tailored summary + ATS keyword
+ * extraction + cold email generation when the user hasn't explicitly picked
+ * a provider in AI Settings (Ollama stays available there as an offline/
+ * no-cloud override, and is also used as an automatic same-request fallback
+ * on Gemini quota errors — see callWithGeminiFallback in default-provider.ts).
+ *
+ * Model history (all verified live against this account's API key):
+ * - "gemini-2.5-flash" (originally requested): 404 "no longer available to
+ *   new users" (2026-07-19).
+ * - "gemini-2.0-flash"/"gemini-2.0-flash-001": 429 quota-exceeded.
+ * - "gemini-flash-latest": worked initially, but hit its free-tier daily cap
+ *   (20 requests/day on the underlying "gemini-3.5-flash" it aliases to)
+ *   after ordinary Generate All usage (2026-07-19) — too low for real usage
+ *   given each Generate All run makes ~4-6 calls including guardrail checks.
+ * - "gemini-flash-lite-latest" (current): confirmed live with 8 consecutive
+ *   successful calls with no 429 (2026-07-19), well past where
+ *   gemini-flash-latest was already exhausted for the day — Flash-Lite
+ *   variants carry a materially higher free-tier daily quota than Flash.
  */
-export const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
+export const DEFAULT_GEMINI_MODEL = "gemini-flash-lite-latest";
 
 // SCORE VARIANCE
 export const SCORE_VARIANCE = {

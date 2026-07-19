@@ -47,6 +47,7 @@ export function GenerateColdEmailButton({
         message,
         content: generated,
         warning,
+        usedOfflineFallback,
       } = await generateColdEmail(profileId, jobId);
 
       if (!success) {
@@ -62,16 +63,20 @@ export function GenerateColdEmailButton({
       setWarning(warning ?? null);
       setDialogOpen(true);
 
+      const offlineSuffix = usedOfflineFallback
+        ? " Using offline mode — Gemini quota reached."
+        : "";
+
       if (warning) {
         toast({
           variant: "destructive",
           title: "Review before sending",
-          description: warning,
+          description: warning + offlineSuffix,
         });
       } else {
         toast({
           variant: "success",
-          description: "Cold email generated and saved.",
+          description: "Cold email generated and saved." + offlineSuffix,
         });
       }
     });

@@ -4,13 +4,12 @@ import { handleError } from "@/lib/utils";
 import { getCurrentUser } from "@/utils/user.utils";
 import { generateText } from "ai";
 import {
-  getModel,
   preprocessResume,
   preprocessJob,
   ATS_KEYWORDS_SYSTEM_PROMPT,
   buildAtsKeywordsPrompt,
   checkRateLimit,
-  resolveDefaultAi,
+  callWithGeminiFallback,
 } from "@/lib/ai";
 import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
@@ -85,26 +84,26 @@ export const extractJobKeywords = async (jobId: string): Promise<any | undefined
       throw new Error(jobPre.error.message);
     }
 
-    const ai = await resolveDefaultAi(user.id);
-    const model = await getModel(ai.provider, ai.model, user.id);
-
-    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
-
-    const result = await generateText({
-      model,
-      system: ATS_KEYWORDS_SYSTEM_PROMPT,
-      prompt: buildAtsKeywordsPrompt(jobText),
-      temperature: TEMPERATURES.ANALYSIS,
-    });
-
-    const keywords = result.text
-      .split("\n")
-      .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
-      .filter(Boolean);
-
-    if (keywords.length === 0) {
-      throw new Error("AI did not return any keywords");
-    }
+    const { result: keywords, usedOfflineFallback } = await callWithGeminiFallback(
+      user.id,
+      async (model, provider) => {
+        const jobText = truncateForProvider(jobPre.data.normalizedText, provider, "JOB");
+        const result = await generateText({
+          model,
+          system: ATS_KEYWORDS_SYSTEM_PROMPT,
+          prompt: buildAtsKeywordsPrompt(jobText),
+          temperature: TEMPERATURES.ANALYSIS,
+        });
+        const parsed = result.text
+          .split("\n")
+          .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+          .filter(Boolean);
+        if (parsed.length === 0) {
+          throw new Error("AI did not return any keywords");
+        }
+        return parsed;
+      },
+    );
 
     await prisma.$transaction([
       prisma.jobKeyword.deleteMany({ where: { jobId, source: "extracted" } }),
@@ -118,7 +117,7 @@ export const extractJobKeywords = async (jobId: string): Promise<any | undefined
       orderBy: { createdAt: "asc" },
     });
 
-    return { success: true, data };
+    return { success: true, data, usedOfflineFallback };
   } catch (error) {
     const msg = "Failed to extract job keywords.";
     return handleError(error, msg);

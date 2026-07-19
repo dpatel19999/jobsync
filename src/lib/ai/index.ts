@@ -1,5 +1,9 @@
 export { getModel, type ProviderType } from "./providers";
-export { resolveDefaultAi } from "./default-provider";
+export {
+  resolveDefaultAi,
+  callWithGeminiFallback,
+  isGeminiQuotaError,
+} from "./default-provider";
 export type {
   JobMatchScores,
   JobMatchResult,

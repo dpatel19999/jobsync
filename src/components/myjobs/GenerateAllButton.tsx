@@ -20,7 +20,9 @@ import {
 import { getCurrentProfileId } from "@/actions/profile.actions";
 
 type StepStatus = "pending" | "running" | "done" | "error" | "skipped";
-type StepState = { label: string; status: StepStatus; error?: string };
+type StepState = { label: string; status: StepStatus; error?: string; note?: string };
+
+const OFFLINE_FALLBACK_NOTE = "Using offline mode — Gemini quota reached.";
 
 const STEP_LABELS = [
   "Extract ATS keywords",
@@ -76,7 +78,10 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
       setRunning(false);
       return;
     }
-    updateStep(0, { status: "done" });
+    updateStep(0, {
+      status: "done",
+      note: keywordsResult.usedOfflineFallback ? OFFLINE_FALLBACK_NOTE : undefined,
+    });
 
     updateStep(1, { status: "running" });
     const scoreResult = await scoreJob(jobId);
@@ -96,13 +101,24 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
       generateTailoredSummary(profileId, jobId),
       generateCoverLetter(profileId, jobId),
     ]);
-    updateStep(2, summaryResult.success ? { status: "done" } : { status: "error", error: summaryResult.message });
-    updateStep(3, coverLetterResult.success ? { status: "done" } : { status: "error", error: coverLetterResult.message });
+    updateStep(
+      2,
+      summaryResult.success
+        ? { status: "done", note: summaryResult.usedOfflineFallback ? OFFLINE_FALLBACK_NOTE : undefined }
+        : { status: "error", error: summaryResult.message },
+    );
+    updateStep(
+      3,
+      coverLetterResult.success
+        ? { status: "done", note: coverLetterResult.usedOfflineFallback ? OFFLINE_FALLBACK_NOTE : undefined }
+        : { status: "error", error: coverLetterResult.message },
+    );
     if (!summaryResult.success || !coverLetterResult.success) {
       setRunning(false);
       return;
     }
 
+    let coldEmailUsedFallback = false;
     if (hasColdEmail) {
       updateStep(4, { status: "skipped" });
     } else {
@@ -113,12 +129,26 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
         setRunning(false);
         return;
       }
-      updateStep(4, { status: "done" });
+      coldEmailUsedFallback = !!coldEmailResult.usedOfflineFallback;
+      updateStep(4, {
+        status: "done",
+        note: coldEmailUsedFallback ? OFFLINE_FALLBACK_NOTE : undefined,
+      });
     }
 
     setRunning(false);
     router.refresh();
-    toast({ variant: "success", description: "Generate All completed." });
+    const anyOffline =
+      keywordsResult.usedOfflineFallback ||
+      summaryResult.usedOfflineFallback ||
+      coverLetterResult.usedOfflineFallback ||
+      coldEmailUsedFallback;
+    toast({
+      variant: "success",
+      description: anyOffline
+        ? `Generate All completed. ${OFFLINE_FALLBACK_NOTE}`
+        : "Generate All completed.",
+    });
   };
 
   const runningIndices = steps.map((s, i) => i).filter((i) => steps[i].status === "running");
@@ -188,6 +218,9 @@ export function GenerateAllButton({ jobId, hasColdEmail }: GenerateAllButtonProp
                   </div>
                   {step.error && (
                     <div className="text-xs text-destructive">{step.error}</div>
+                  )}
+                  {step.note && (
+                    <div className="text-xs text-muted-foreground">{step.note}</div>
                   )}
                 </div>
               </li>

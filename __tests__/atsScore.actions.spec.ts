@@ -36,14 +36,31 @@ const {
   checkRateLimitMock,
   resolveJobLanguageMock,
   resolveDefaultAiMock,
-} = vi.hoisted(() => ({
-  getModelMock: vi.fn(),
-  preprocessResumeMock: vi.fn(),
-  preprocessJobMock: vi.fn(),
-  checkRateLimitMock: vi.fn(),
-  resolveJobLanguageMock: vi.fn(),
-  resolveDefaultAiMock: vi.fn(),
-}));
+  callWithGeminiFallbackMock,
+} = vi.hoisted(() => {
+  const getModelMock = vi.fn();
+  const resolveDefaultAiMock = vi.fn();
+  // Default pass-through: resolves the provider (via resolveDefaultAiMock),
+  // gets the model (via getModelMock), and calls the action's `run`
+  // callback — mirrors the real callWithGeminiFallback so existing
+  // getModelMock assertions still hold. Individual tests override this to
+  // exercise the actual quota-fallback behavior.
+  const callWithGeminiFallbackMock = vi.fn(async (userId: string, run: any) => {
+    const ai = await resolveDefaultAiMock(userId);
+    const model = await getModelMock(ai.provider, ai.model, userId);
+    const result = await run(model, ai.provider);
+    return { result, providerUsed: ai.provider, usedOfflineFallback: false };
+  });
+  return {
+    getModelMock,
+    preprocessResumeMock: vi.fn(),
+    preprocessJobMock: vi.fn(),
+    checkRateLimitMock: vi.fn(),
+    resolveJobLanguageMock: vi.fn(),
+    resolveDefaultAiMock,
+    callWithGeminiFallbackMock,
+  };
+});
 vi.mock("@/actions/job.actions", () => ({
   getJobDetails: vi.fn(),
   resolveJobLanguage: resolveJobLanguageMock,
@@ -70,6 +87,7 @@ vi.mock("@/lib/ai", () => ({
   buildAtsKeywordsPrompt: (jobText: string) => `ATS_PROMPT:${jobText.length}`,
   checkRateLimit: checkRateLimitMock,
   resolveDefaultAi: resolveDefaultAiMock,
+  callWithGeminiFallback: callWithGeminiFallbackMock,
 }));
 
 const VALID_USER = { id: "user-1", name: "Test", email: "test@test.com" };
@@ -102,6 +120,21 @@ describe("extractJobKeywords — edge cases", () => {
 
     await extractJobKeywords("job-1");
     expect(getModelMock).toHaveBeenCalledWith("ollama", "llama3.2:3b", VALID_USER.id);
+  });
+
+  it("surfaces usedOfflineFallback on the result when callWithGeminiFallback had to fall back to Ollama", async () => {
+    (getJobDetails as any).mockResolvedValue({ success: true, job: { id: "job-1" } });
+    preprocessJobMock.mockResolvedValue({ success: true, data: { normalizedText: "A".repeat(300) } });
+    (prisma.jobKeyword.findMany as any).mockResolvedValue([]);
+    callWithGeminiFallbackMock.mockImplementationOnce(async (_userId: string, run: any) => {
+      const result = await run({ modelId: "ollama-fallback-model" }, "ollama");
+      return { result, providerUsed: "ollama", usedOfflineFallback: true };
+    });
+    (generateText as any).mockResolvedValue({ text: "Node.js\nAWS" });
+
+    const result = await extractJobKeywords("job-1");
+    expect(result.success).toBe(true);
+    expect(result.usedOfflineFallback).toBe(true);
   });
 
   it("fails cleanly when the job is not found", async () => {

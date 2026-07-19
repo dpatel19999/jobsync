@@ -43,7 +43,7 @@ export function TailoredSummarySection({
         return;
       }
 
-      const { success, message, content, warning } =
+      const { success, message, content, warning, usedOfflineFallback } =
         await generateTailoredSummary(profileId, jobId);
 
       if (!success) {
@@ -59,16 +59,20 @@ export function TailoredSummarySection({
       setWarning(warning ?? null);
       setDialogOpen(true);
 
+      const offlineSuffix = usedOfflineFallback
+        ? " Using offline mode — Gemini quota reached."
+        : "";
+
       if (warning) {
         toast({
           variant: "destructive",
           title: "Review before using",
-          description: warning,
+          description: warning + offlineSuffix,
         });
       } else {
         toast({
           variant: "success",
-          description: "Tailored summary generated and saved.",
+          description: "Tailored summary generated and saved." + offlineSuffix,
         });
       }
     });

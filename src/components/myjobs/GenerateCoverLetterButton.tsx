@@ -47,6 +47,7 @@ export function GenerateCoverLetterButton({
         message,
         content: generated,
         warning,
+        usedOfflineFallback,
       } = await generateCoverLetter(profileId, jobId);
 
       if (!success) {
@@ -62,16 +63,20 @@ export function GenerateCoverLetterButton({
       setWarning(warning ?? null);
       setDialogOpen(true);
 
+      const offlineSuffix = usedOfflineFallback
+        ? " Using offline mode — Gemini quota reached."
+        : "";
+
       if (warning) {
         toast({
           variant: "destructive",
           title: "Review before sending",
-          description: warning,
+          description: warning + offlineSuffix,
         });
       } else {
         toast({
           variant: "success",
-          description: "Cover letter generated and saved.",
+          description: "Cover letter generated and saved." + offlineSuffix,
         });
       }
     });

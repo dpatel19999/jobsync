@@ -59,14 +59,30 @@ const {
   generateVerifiedContentMock,
   checkRateLimitMock,
   resolveDefaultAiMock,
-} = vi.hoisted(() => ({
-  getModelMock: vi.fn(),
-  preprocessResumeMock: vi.fn(),
-  preprocessJobMock: vi.fn(),
-  generateVerifiedContentMock: vi.fn(),
-  checkRateLimitMock: vi.fn(),
-  resolveDefaultAiMock: vi.fn(),
-}));
+  callWithGeminiFallbackMock,
+} = vi.hoisted(() => {
+  const getModelMock = vi.fn();
+  const resolveDefaultAiMock = vi.fn();
+  // Default pass-through: mirrors the real callWithGeminiFallback using the
+  // already-mocked resolveDefaultAi/getModel, so existing assertions on
+  // getModelMock's call args keep working. Individual tests override this
+  // to exercise the actual quota-fallback behavior.
+  const callWithGeminiFallbackMock = vi.fn(async (userId: string, run: any) => {
+    const ai = await resolveDefaultAiMock(userId);
+    const model = await getModelMock(ai.provider, ai.model, userId);
+    const result = await run(model, ai.provider);
+    return { result, providerUsed: ai.provider, usedOfflineFallback: false };
+  });
+  return {
+    getModelMock,
+    preprocessResumeMock: vi.fn(),
+    preprocessJobMock: vi.fn(),
+    generateVerifiedContentMock: vi.fn(),
+    checkRateLimitMock: vi.fn(),
+    resolveDefaultAiMock,
+    callWithGeminiFallbackMock,
+  };
+});
 vi.mock("@/lib/ai", () => ({
   getModel: getModelMock,
   preprocessResume: preprocessResumeMock,
@@ -86,6 +102,7 @@ vi.mock("@/lib/ai", () => ({
   generateVerifiedContent: generateVerifiedContentMock,
   checkRateLimit: checkRateLimitMock,
   resolveDefaultAi: resolveDefaultAiMock,
+  callWithGeminiFallback: callWithGeminiFallbackMock,
 }));
 
 describe("coverLetterActions", () => {
@@ -465,6 +482,16 @@ describe("coverLetterActions", () => {
       expect(getModelMock).toHaveBeenCalledWith("ollama", "llama3.2:3b", "user-id");
     });
 
+    it("surfaces usedOfflineFallback on the result when a Gemini quota error fell back to Ollama", async () => {
+      callWithGeminiFallbackMock.mockImplementationOnce(async (_userId: string, run: any) => {
+        const result = await run({ modelId: "ollama-fallback-model" }, "ollama");
+        return { result, providerUsed: "ollama", usedOfflineFallback: true };
+      });
+      const result = await generateColdEmail("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.usedOfflineFallback).toBe(true);
+    });
+
     it("fails cleanly when the job is not found", async () => {
       (getJobDetails as any).mockResolvedValue({ success: false, job: null });
       const result = await generateColdEmail("profile-1", "job-1");
@@ -702,6 +729,16 @@ describe("coverLetterActions", () => {
       expect(getModelMock).toHaveBeenCalledWith("ollama", "llama3.2:3b", "user-id");
     });
 
+    it("surfaces usedOfflineFallback on the result when a Gemini quota error fell back to Ollama", async () => {
+      callWithGeminiFallbackMock.mockImplementationOnce(async (_userId: string, run: any) => {
+        const result = await run({ modelId: "ollama-fallback-model" }, "ollama");
+        return { result, providerUsed: "ollama", usedOfflineFallback: true };
+      });
+      const result = await generateCoverLetter("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.usedOfflineFallback).toBe(true);
+    });
+
     it("fails cleanly when no resume can be resolved", async () => {
       (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: null });
       (prisma.resume.findFirst as any).mockResolvedValue(null);
@@ -816,6 +853,16 @@ describe("coverLetterActions", () => {
       resolveDefaultAiMock.mockResolvedValue({ provider: "ollama", model: "llama3.2:3b" });
       await generateTailoredSummary("profile-1", "job-1");
       expect(getModelMock).toHaveBeenCalledWith("ollama", "llama3.2:3b", "user-id");
+    });
+
+    it("surfaces usedOfflineFallback on the result when a Gemini quota error fell back to Ollama", async () => {
+      callWithGeminiFallbackMock.mockImplementationOnce(async (_userId: string, run: any) => {
+        const result = await run({ modelId: "ollama-fallback-model" }, "ollama");
+        return { result, providerUsed: "ollama", usedOfflineFallback: true };
+      });
+      const result = await generateTailoredSummary("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.usedOfflineFallback).toBe(true);
     });
 
     it("fails cleanly when no resume can be resolved", async () => {

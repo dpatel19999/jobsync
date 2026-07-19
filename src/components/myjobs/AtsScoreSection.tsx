@@ -58,7 +58,7 @@ export function AtsScoreSection({
 
   const onExtract = () => {
     startExtracting(async () => {
-      const { success, message, data } = await extractJobKeywords(jobId);
+      const { success, message, data, usedOfflineFallback } = await extractJobKeywords(jobId);
       if (!success) {
         toast({
           variant: "destructive",
@@ -68,7 +68,12 @@ export function AtsScoreSection({
         return;
       }
       setKeywords(data);
-      toast({ variant: "success", description: "Keywords extracted." });
+      toast({
+        variant: "success",
+        description: usedOfflineFallback
+          ? "Keywords extracted. Using offline mode — Gemini quota reached."
+          : "Keywords extracted.",
+      });
     });
   };
 
