@@ -47,6 +47,9 @@
   the "Job language persistence" section near the end of this file.
 - `tailoredSummary` field on `Job` — ✅ done (`feature/cover-letter-resume-
   tailoring`) — see "Cover letter generation + resume tailoring" section.
+- `MasterTemplate` (versioned master resume/cover-letter templates) — ✅ done
+  (`feature/master-templates`) — see "Master templates" section near the end
+  of this file.
 
 ## ATS keyword scoring module (done, branch `feature/ats-scoring`)
 
@@ -484,3 +487,82 @@ score 55, no Ollama call), ~311s tailored summary, ~524s cover letter (192
 words), ~322s cold email (112 words) — **~20.6 minutes end to end**. Final
 DB read confirmed all five outputs correctly saved together on one Job row
 with no cross-step clobbering.
+
+## Master templates (done, branch `feature/master-templates`)
+
+Storage layer for the four master-template slots the user imports once and
+reuses as source wording for a *future* AI-tailoring generation step (not
+built yet — this pass is storage + upload UI + availability check only, no
+generation reads these yet).
+
+- `prisma/schema.prisma`'s `MasterTemplate` model (migration
+  `20260719194821_add_master_template`): `userId`, `slot` (string:
+  `"RESUME_EN"` | `"RESUME_DE"` | `"COVER_LETTER_EN"` | `"COVER_LETTER_DE"`),
+  `version` (int, per-slot sequential), `isCurrent` (bool), `fileName`,
+  `filePath`, `extractedText`, `createdAt`. `@@unique([userId, slot,
+  version])` + `@@index([userId, slot, isCurrent])`.
+- `src/models/template.model.ts` — `TemplateSlot`/`TemplateKind` enums,
+  `TEMPLATE_SLOT_LABELS`, `templateSlotFor(kind, language)`, and
+  `languageToTemplateLanguage()` (bridges `Job.language`'s persisted
+  lowercase `"en"|"de"` to the slot naming's uppercase suffix — the one
+  place that conversion happens).
+- `src/actions/templates.actions.ts`:
+  - `uploadMasterTemplate(slot, formData)` — same validation chain as resume
+    upload (size cap, MIME allow-list, magic-byte content check reusing
+    `PDF_MAGIC`/`ZIP_MAGIC` from the resume-import module), then reuses
+    `extractText()` from `src/lib/ai/import/extract-text.ts` verbatim (no AI
+    rewriting at import time, per requirement — the raw extracted text is
+    stored as-is; tailoring happens at a future generation step, not here).
+    Files land in `data/files/templates/` (mirrors `data/files/resumes/`).
+    Versioning is a single `$transaction`: read the slot's current max
+    version, flip any existing `isCurrent:true` row for that slot to
+    `false`, then create the new row at `version+1, isCurrent:true` — the
+    prior version's DB row and on-disk file are both left in place, never
+    deleted.
+  - `getMasterTemplates()` — current-version row per slot the user has
+    uploaded at least once; unfilled slots simply don't appear (four slots
+    aren't required).
+  - `getTemplateForJobLanguage(kind, language)` — returns `data: null` (not
+    an error) when the language is unset/undetected or no matching template
+    exists for that kind+language; this is what backs the job-detail
+    empty-state message.
+- UI: `src/components/settings/TemplatesSettings.tsx`, added as a new
+  "Templates" tab in `SettingsSidebar.tsx`/`dashboard/settings/page.tsx`
+  (same `Card`-per-item layout as `ApiKeySettings.tsx`). Each of the four
+  slots shows current filename + version + upload date (via `date-fns`
+  `format`) or "No template uploaded yet", with an explicit "Import
+  template" / "Import new version" button per slot (hidden file input,
+  triggered on click — no drag-drop/auto-detect, per requirement).
+- `src/components/myjobs/TemplateAvailabilityNote.tsx` — job-detail-page
+  indicator, one instance each for `RESUME` and `COVER_LETTER`, wired into
+  `JobDetails.tsx` right under the button toolbar (only rendered once
+  `job.language` is set — before language detection there's nothing
+  meaningful to check yet). Calls `getTemplateForJobLanguage` client-side on
+  mount/language-change: renders "No {German|English} {resume|cover letter}
+  template uploaded yet." in amber when missing, or a muted "Using {language}
+  {kind} template: {fileName}" note when one exists. This is the mechanism
+  that satisfies "don't silently fall back to the wrong language" — the gap
+  is stated plainly rather than the (not-yet-built) generation step guessing.
+
+**Verified via a real, temporary script** (`scripts/verify-master-templates.ts`,
+deleted after use, same `server-only`-stub auth-bypass pattern as every
+other verification script this session) against real Prisma + a real
+previously-uploaded PDF resume file (213KB, from the resume-upload-bug-fix
+item's fixture account): uploaded v1 into `RESUME_EN` (5,552 extracted
+chars, correctly retrievable via the current-templates query), confirmed
+`getTemplateForJobLanguage(COVER_LETTER, "de")` correctly returned `null`
+before any German cover-letter template existed, uploaded v2 into the same
+`RESUME_EN` slot and confirmed both v1 (`isCurrent:false`, still present —
+not deleted) and v2 (`isCurrent:true`) rows existed side by side, uploaded
+`COVER_LETTER_DE` and confirmed the same lookup now found it by filename,
+and confirmed `COVER_LETTER_EN` (never uploaded) still correctly resolved to
+`null`. Fixture rows and files cleaned up after (0 leftover rows confirmed).
+`__tests__/templates.actions.spec.ts` (12 tests, mocked Prisma/fs/extractText)
+covers the same scenarios plus validation-failure edge cases (invalid slot,
+no file, disallowed MIME, magic-byte mismatch, extraction failure) faster
+and deterministically for regression coverage going forward.
+
+**Not built (explicitly out of scope for this pass)**: anything that reads
+`extractedText` back out for actual generation — no cover-letter/resume
+draft today pulls from a `MasterTemplate` row. That's the natural next step
+once this storage layer exists.

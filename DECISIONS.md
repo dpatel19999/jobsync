@@ -572,6 +572,57 @@ Format: Decision — Rationale
   All's ~4 base calls plus guardrail fact-check calls can exhaust that in
   2-3 runs. Not fixed here; flagged for whoever revisits this next.
 
+- **`feature/master-templates`: template slots are `slot: String` on a single
+  `MasterTemplate` table, not four separate models or a `kind`+`language`
+  compound key** — `"RESUME_EN"`/`"RESUME_DE"`/`"COVER_LETTER_EN"`/
+  `"COVER_LETTER_DE"` as plain string values, same pattern `JobKeyword.source`
+  already uses (`"extracted"` | `"manual"`) rather than a Prisma enum (SQLite
+  has no native enum type; Prisma enums on SQLite still just become a checked
+  string column, so a plain string with an app-level `TemplateSlot` TS enum
+  is equally safe and simpler to extend if a third language is ever added).
+- **Versioning via `isCurrent: Boolean` + monotonic `version: Int` per slot,
+  not a separate "history" table** — re-importing a slot never deletes the
+  previous row or its on-disk file; it just flips the old row to
+  `isCurrent: false` and inserts a new one at `version + 1`, both inside one
+  `$transaction` so a crash mid-upload can't leave two rows marked current.
+  Simpler than a parent/child history-table split for what is, today, just
+  "keep old versions around, always read the latest" — no version-diffing or
+  restore-a-prior-version UI was requested.
+- **No AI rewriting at import time — `extractedText` is exactly what
+  `extractText()` (the existing PDF/DOCX extraction module built for resume
+  upload) returns**, reused as-is rather than re-implemented. This was an
+  explicit requirement ("preserve exact original wording/structure at this
+  stage — no AI rewriting during import, that happens later at generation
+  time"); the future tailoring step is a separate, not-yet-built pass that
+  reads `extractedText` rather than the raw file.
+- **Empty-state check (`getTemplateForJobLanguage`) returns `data: null` as a
+  *successful* result, not an error** — "no template for this language yet"
+  is an expected, normal state (most users won't fill all four slots
+  immediately), not a failure. `TemplateAvailabilityNote.tsx` only renders
+  once `job.language` is set (before that, there's nothing meaningful to
+  check — showing "no template" for a language that hasn't even been
+  detected yet would be a false signal, not a helpful one).
+- **`TemplateAvailabilityNote` built once and used for both `RESUME` and
+  `COVER_LETTER` kinds**, not a cover-letter-only component — the requirement
+  language ("a job's language... no matching template uploaded yet") reads
+  as a general rule the four-slot design implies applies to both kinds
+  equally, and the component is a few lines of shared logic either way; this
+  isn't scope creep, it's applying the same already-scoped rule consistently
+  rather than arbitrarily only wiring up one of the two kinds it naturally
+  covers.
+- **Verified via a real, temporary script (`scripts/verify-master-templates.ts`,
+  deleted after use) against real Prisma + a real previously-uploaded PDF
+  resume file**, reusing the same `server-only`-stub auth-bypass pattern as
+  every other verification script this session (`getCurrentUser()`/`auth()`
+  needs a real Next.js request context a plain script doesn't have). Real
+  upload → real extraction (5,552 chars) → real versioning (v1 kept,
+  isCurrent flipped, v2 created) → real empty-state-then-found-state
+  transition for `COVER_LETTER_DE`, all against real `dev.db`. Fixture rows
+  and files cleaned up after (0 leftover rows confirmed by a final count
+  query). `__tests__/templates.actions.spec.ts` (12 tests) covers the same
+  ground plus validation-failure edges with mocked Prisma/fs for fast
+  regression coverage.
+
 - **gemini-flash-lite-latest + automatic Ollama fallback**: switched
   `DEFAULT_GEMINI_MODEL` to a Flash-Lite variant (materially higher free-
   tier daily quota, verified live) rather than paying for a Gemini tier or

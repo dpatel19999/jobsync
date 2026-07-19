@@ -3,9 +3,8 @@
 ## Last updated
 Everything below is **committed and merged into `main`**. No feature
 branches exist right now — only `main`. `main` is ahead of
-`origin/main`, never pushed (no request to). Targeted tests for the newest
-feature (below) confirmed passing; full suite not re-run this session per
-explicit instruction ("targeted tests only").
+`origin/main`, never pushed (no request to). Full suite re-run this session
+after adding master-template storage: 107/107 files, 1391/1391 tests passing.
 
 **Recurring verification note**: `getCurrentUser()` (via next-auth's
 `auth()`) needs a real Next.js request context — it always fails when a
@@ -309,6 +308,24 @@ a past session's account was accurate.
     actually fails, not on every run) — just don't assume the RAM-lag
     complaint is 100% permanently eliminated under all load conditions.
 
+17. **Master resume/cover-letter template storage** (`feature/master-templates`)
+    — new `MasterTemplate` Prisma model, four slots (Resume EN/DE, Cover
+    Letter EN/DE), versioned (re-import keeps the prior version, never
+    deletes it). Reuses the existing PDF/DOCX extraction pipeline
+    (`extractText()`) verbatim for import — **no AI rewriting happens at
+    import time**, `extractedText` is stored exactly as extracted; a future
+    generation step is meant to read it, not built yet. `src/actions/
+    templates.actions.ts`: `uploadMasterTemplate`, `getMasterTemplates`,
+    `getTemplateForJobLanguage`. UI: new "Templates" tab in Settings
+    (`TemplatesSettings.tsx`, explicit "Import template" button per slot, no
+    auto-detect) + `TemplateAvailabilityNote.tsx` on the job detail page
+    (shows "No German cover letter template uploaded yet" style messages
+    when `job.language` has no matching template, for both Resume and Cover
+    Letter kinds). 12 unit tests + a real E2E script against real Prisma and
+    a real uploaded PDF (upload → extract → version v1→v2 → retrieve →
+    empty-state → found-state, all confirmed, fixtures cleaned up). Full
+    detail in ARCHITECTURE.md's "Master templates" section.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);
@@ -317,15 +334,20 @@ changes. Not modified — don't "fix" this without re-confirming it's still
 just load-related.
 
 ## Immediate next steps
-1. **Full-OAuth Gmail integration is next** (auto-tracking, not the compose
-   link built in #8). Read DECISIONS.md's "Gmail-integration security prep"
+1. **Master-template *generation* is the natural next step for item #17** —
+   storage/upload/empty-state exist, but nothing reads `MasterTemplate.
+   extractedText` back out yet. A future pass would wire it into
+   `generateCoverLetter`/tailored-summary as the source wording instead of
+   (or alongside) the resume's structured `ResumeSection`s.
+2. **Full-OAuth Gmail integration** (auto-tracking, not the compose link
+   built in #8). Read DECISIONS.md's "Gmail-integration security prep"
    entry *before* designing anything — it has concrete requirements (encrypt
    tokens like the existing `ApiKey` pattern, minimal scopes, OAuth `state`
    validation, fence all email content through the prompt-fencing module
    from day one, login rate limiting becomes non-theoretical once real
    tokens exist).
-2. `main` is ahead of `origin/main` — push only if/when asked.
-3. Two flagged-but-unresolved local-model limitations remain open (see
+3. `main` is ahead of `origin/main` — push only if/when asked.
+4. Two flagged-but-unresolved local-model limitations remain open (see
    items 3 and 4 above) — revisit if real usage shows either is too noisy,
    not proactively.
 
