@@ -1,6 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
-import { Send } from "lucide-react";
+import { Loader, Send, Sparkles } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -13,36 +13,85 @@ import {
 } from "../ui/dialog";
 import { toast } from "../ui/use-toast";
 import { updateJobEmailTo } from "@/actions/job.actions";
+import { generateColdEmail } from "@/actions/coverLetter.actions";
+import { getCurrentProfileId } from "@/actions/profile.actions";
 import {
   buildDefaultEmailSubject,
   buildGmailComposeUrl,
 } from "@/lib/gmail-compose";
+import { fillColdEmailTemplate } from "@/lib/coldEmailTemplate";
 
 type SendEmailButtonProps = {
   jobId: string;
   jobTitle?: string | null;
+  companyName?: string | null;
   senderName?: string | null;
   initialEmailTo?: string | null;
-  initialBody?: string | null;
 };
 
 // v1 "Send Email": builds a Gmail compose-window deep link (no OAuth, no
 // Gmail API — see DECISIONS.md) and opens it in a new tab. The user reviews
 // and sends from inside their own logged-in Gmail.
+//
+// Body defaults to the static (non-AI, instant) cold-email template with
+// [Job Title]/[Company Name] filled in — no Ollama call needed for the
+// common case. "Generate custom draft instead" is an opt-in that calls the
+// existing full-AI generateColdEmail action and swaps the body to its output.
 export function SendEmailButton({
   jobId,
   jobTitle,
+  companyName,
   senderName,
   initialEmailTo,
-  initialBody,
 }: SendEmailButtonProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [to, setTo] = useState(initialEmailTo ?? "");
   const [subject, setSubject] = useState(
     buildDefaultEmailSubject(senderName, jobTitle),
   );
-  const [body, setBody] = useState(initialBody ?? "");
+  const [body, setBody] = useState(() =>
+    fillColdEmailTemplate(jobTitle ?? "", companyName ?? ""),
+  );
   const [isPending, startTransition] = useTransition();
+  const [isGenerating, startGenerating] = useTransition();
+
+  const onGenerateCustomDraft = () => {
+    startGenerating(async () => {
+      const profileId = await getCurrentProfileId();
+      if (!profileId) {
+        toast({
+          variant: "destructive",
+          title: "Error!",
+          description:
+            "Set up your profile with a resume before generating a custom draft.",
+        });
+        return;
+      }
+
+      const {
+        success,
+        message,
+        content: generated,
+        warning,
+      } = await generateColdEmail(profileId, jobId);
+
+      if (!success) {
+        toast({
+          variant: "destructive",
+          title: "Error!",
+          description: message ?? "Failed to generate custom draft.",
+        });
+        return;
+      }
+
+      setBody(generated);
+      toast({
+        variant: warning ? "destructive" : "success",
+        title: warning ? "Review before sending" : undefined,
+        description: warning ?? "Custom draft generated.",
+      });
+    });
+  };
 
   const onSend = () => {
     const recipient = to.trim();
@@ -108,7 +157,24 @@ export function SendEmailButton({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="send-email-body">Body</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="send-email-body">Body</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 text-xs cursor-pointer"
+                  onClick={onGenerateCustomDraft}
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? (
+                    <Loader className="h-3.5 w-3.5 shrink-0 spinner" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  Generate custom draft instead
+                </Button>
+              </div>
               <textarea
                 id="send-email-body"
                 value={body}

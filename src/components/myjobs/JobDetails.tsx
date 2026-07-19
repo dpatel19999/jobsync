@@ -204,13 +204,13 @@ function JobDetails({
           <SendEmailButton
             jobId={job.id}
             jobTitle={job.JobTitle?.label}
+            companyName={job.Company?.label}
             senderName={
               job.Resume?.ContactInfo
                 ? `${job.Resume.ContactInfo.firstName} ${job.Resume.ContactInfo.lastName}`.trim()
                 : null
             }
             initialEmailTo={job.emailTo}
-            initialBody={job.ColdEmail?.content}
           />
           <MarkAppliedButton jobId={job.id} initialApplied={job.applied} />
           <DropdownMenu>

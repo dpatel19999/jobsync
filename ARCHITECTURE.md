@@ -371,3 +371,30 @@ this one).
   `applied` still `false`; fixed by waiting for the success toast (which
   only fires after the awaited action resolves) before reading the DB, which
   then correctly showed `applied: true` with a real `appliedDate`.
+
+## Static cold-email template (done, merged to `main`)
+
+Replaces the AI generation as the *default* body for Send Email — instant,
+no Ollama call. Full AI generation is kept as an opt-in.
+
+- `src/lib/coldEmailTemplate.ts` — `COLD_EMAIL_TEMPLATE` (verbatim,
+  user-supplied text: German section, `English version;` separator line,
+  English section) and `fillColdEmailTemplate(jobTitle, companyName)`, which
+  does plain `.replaceAll()` substitution of `[Job Title]`/`[Company Name]`
+  across the whole string (2 and 6 occurrences respectively, once/thrice per
+  language section).
+- `SendEmailButton.tsx` now initializes its body state from
+  `fillColdEmailTemplate(jobTitle, companyName)` instead of an existing
+  `ColdEmail.content`. A "Generate custom draft instead" button next to the
+  Body label calls the existing `generateColdEmail` action (same as
+  `GenerateColdEmailButton`, which is unchanged and still exists separately
+  on the page) and swaps the body to its output on success.
+- Verified via a real Playwright click-through against a throwaway fixture
+  job (title "Automation Engineer", company "Beispiel AG", deleted after):
+  opening Send Email showed the template instantly filled correctly in
+  *both* language sections (checked both the German and English paragraphs
+  individually), with no AI call made. Clicking "Open in Gmail" and decoding
+  Google's sign-in `continue=` redirect (same method as the Send Email
+  verification above) confirmed the full body — both languages, umlauts,
+  the "English version;" separator — arrived at Google exactly as rendered
+  in the dialog.
