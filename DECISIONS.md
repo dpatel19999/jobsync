@@ -524,3 +524,21 @@ Format: Decision — Rationale
   for future verbatim-wording tailoring — re-extracting from the retained
   uploaded file on demand is simpler and the file is never deleted out from
   under a `Resume` row today.
+
+- **Gemini as default provider (cover letter + tailored summary only)**: the
+  full Gemini provider integration (registry, factory, verifier, models
+  route, env-var resolution) already existed — the actual change was a new
+  `resolveCoverLetterAi()` helper in `coverLetter.actions.ts` that defaults
+  to Gemini unless the user has explicitly saved a provider in AI Settings,
+  scoped to only `generateCoverLetter`/`generateTailoredSummary`. ATS keyword
+  extraction and cold email generation were deliberately left on the
+  Ollama-default path — not mentioned in the request, and changing them
+  would've been unrequested scope creep. Decision: use `"gemini-flash-
+  latest"` instead of the requested `"gemini-2.5-flash"` for
+  `DEFAULT_GEMINI_MODEL` — verified live (2026-07-19) that `gemini-2.5-flash`
+  404s ("no longer available to new users") and `gemini-2.0-flash` 429s
+  (quota exceeded) on this account's API key, while `gemini-flash-latest`
+  works. If the account's model access changes later, this is a one-line
+  swap in `src/lib/ai/config.ts`. `GenerateAllButton.tsx`'s tailored-summary
+  and cover-letter steps now run via `Promise.all` (independent outputs, no
+  reason to serialize) instead of sequentially.

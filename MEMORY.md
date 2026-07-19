@@ -177,6 +177,41 @@ a past session's account was accurate.
     exact original wording" feature would need to either re-extract from the
     file on demand or add a raw-text cache field; flagged, not built.
 
+13. **Gemini as default provider for cover letter + tailored summary**
+    (`feature/gemini-default-provider`) — provider abstraction, registry
+    entry, factory (`createGoogleGenerativeAI`), verifier, models API route,
+    and `resolveApiKey`'s env-var fallback for `GEMINI_API_KEY` **already
+    existed in full** before this change (this app already supported Gemini
+    as a selectable provider everywhere). What was missing was making it the
+    *default* for `generateCoverLetter`/`generateTailoredSummary` specifically
+    (not ATS keyword extraction or cold email — both untouched, still
+    Ollama-default), while leaving Ollama fully available as an explicit
+    user override in AI Settings. Added `resolveCoverLetterAi()` in
+    `coverLetter.actions.ts`: defaults to `{provider: gemini, model:
+    DEFAULT_GEMINI_MODEL}` unless a `UserSettings.ai.provider` is explicitly
+    saved, in which case that's honored (including falling back to
+    `DEFAULT_OLLAMA_MODEL` if a saved Ollama preference omits a model).
+    **Model name discrepancy, verified live 2026-07-19**: the requested
+    `gemini-2.5-flash` returns `404 "no longer available to new users"` on
+    this account's key, and `gemini-2.0-flash`/`gemini-2.0-flash-001` return
+    `429` quota-exceeded (this is the same "zero-quota" issue noted in .env
+    on 2026-07-18 — still true for those specific models). `gemini-flash-
+    latest` is the model that actually works (confirmed via direct API call
+    and a full generation test) — used as `DEFAULT_GEMINI_MODEL` in
+    `src/lib/ai/config.ts` instead. `GenerateAllButton.tsx`'s steps 3+4
+    (tailored summary, cover letter) now run via `Promise.all` instead of
+    sequentially, since neither depends on the other's output; the progress
+    headline was extended to show multiple simultaneously-running/failed
+    step indices. Guardrail pipeline (`generateVerifiedContent`, writing-
+    tells, factual-accuracy) untouched — only the model call underneath
+    changed. **Verified for real**: a fixture job under the akbaridhruvil53
+    account (using its now-backfilled resume from item #12) ran the actual
+    parallel Gemini calls — both `verified: true` on the first attempt,
+    11.7s total wall-clock (well under the 60s target), real grounded
+    content (16% downtime reduction, 51%→60% OEE, actual certs — no
+    fabrication). Fixture job deleted after; script + `server-only` stub
+    deleted per the established verification pattern.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);
