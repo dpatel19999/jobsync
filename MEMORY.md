@@ -2,10 +2,16 @@
 
 ## Last updated
 Everything below is **committed and merged into `main`**. No feature
-branches exist right now — only `main`. `main` is ahead of
-`origin/main`, never pushed (no request to). Full suite re-run this session
-after adding .docx export for the resume rewrite: 109/110 files, 1421/1422
-tests passing (the 1 failure is `AddJob.spec.tsx`'s known pre-existing
+branches exist right now — only `main`. `origin/main` was pushed to
+(from outside this session — the user's own `git push`, not something any
+session did) up through the master-template-storage work; `main` is now 2
+commits ahead of `origin/main` for this session's newest work (the .docx
+export), unpushed. Don't assume "ahead of origin" means "never pushed" —
+check `git rev-list --count origin/main..HEAD` fresh each session rather
+than trusting this note's exact number, since it goes stale the moment
+anyone pushes outside of a session. Full suite re-run this session after
+adding .docx export for the resume rewrite: 109/110 files, 1421/1422 tests
+passing (the 1 failure is `AddJob.spec.tsx`'s known pre-existing
 full-suite-parallel-load flakiness — 17/17 pass in isolation, confirmed
 unrelated to this session's changes, see "Known, accepted flakiness" below).
 
