@@ -2,10 +2,21 @@ import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SendEmailButton } from "@/components/myjobs/SendEmailButton";
+import { fillColdEmailTemplate } from "@/lib/coldEmailTemplate";
 
 const mockUpdateJobEmailTo = vi.fn();
 vi.mock("@/actions/job.actions", () => ({
   updateJobEmailTo: (...args: any[]) => mockUpdateJobEmailTo(...args),
+}));
+
+const mockGenerateColdEmail = vi.fn();
+vi.mock("@/actions/coverLetter.actions", () => ({
+  generateColdEmail: (...args: any[]) => mockGenerateColdEmail(...args),
+}));
+
+const mockGetCurrentProfileId = vi.fn();
+vi.mock("@/actions/profile.actions", () => ({
+  getCurrentProfileId: (...args: any[]) => mockGetCurrentProfileId(...args),
 }));
 
 const mockToast = vi.fn();
@@ -50,15 +61,15 @@ describe("SendEmailButton", () => {
     openSpy.mockRestore();
   });
 
-  it("pre-fills To/Subject/Body from props when the dialog opens", async () => {
+  it("pre-fills the body with the static template (job title/company substituted), instantly, with no AI call", async () => {
     const user = userEvent.setup();
     render(
       <SendEmailButton
         jobId="job-1"
         jobTitle="Backend Engineer"
+        companyName="Acme GmbH"
         senderName="Dhruvil Patel"
         initialEmailTo="recruiter@example.com"
-        initialBody={"Dear Hiring Team,\n\nPlease find my application attached."}
       />,
     );
 
@@ -71,20 +82,21 @@ describe("SendEmailButton", () => {
       "Application — Dhruvil Patel — Backend Engineer",
     );
     expect(screen.getByLabelText(/body/i)).toHaveValue(
-      "Dear Hiring Team,\n\nPlease find my application attached.",
+      fillColdEmailTemplate("Backend Engineer", "Acme GmbH"),
     );
+    expect(mockGenerateColdEmail).not.toHaveBeenCalled();
   });
 
-  it("opens a correctly-encoded Gmail compose URL in a new tab on Open in Gmail", async () => {
+  it("opens a correctly-encoded Gmail compose URL containing the filled template", async () => {
     mockUpdateJobEmailTo.mockResolvedValue({ success: true });
     const user = userEvent.setup();
     render(
       <SendEmailButton
         jobId="job-1"
         jobTitle="Backend Engineer"
+        companyName="Acme GmbH"
         senderName="Dhruvil Patel"
         initialEmailTo="recruiter@example.com"
-        initialBody={"Line one\nLine two"}
       />,
     );
 
@@ -101,12 +113,10 @@ describe("SendEmailButton", () => {
     expect(parsed.origin + parsed.pathname).toBe(
       "https://mail.google.com/mail/",
     );
-    expect(parsed.searchParams.get("view")).toBe("cm");
     expect(parsed.searchParams.get("to")).toBe("recruiter@example.com");
-    expect(parsed.searchParams.get("su")).toBe(
-      "Application — Dhruvil Patel — Backend Engineer",
+    expect(parsed.searchParams.get("body")).toBe(
+      fillColdEmailTemplate("Backend Engineer", "Acme GmbH"),
     );
-    expect(parsed.searchParams.get("body")).toBe("Line one\nLine two");
   });
 
   it("blocks sending and shows an error toast when the recipient is empty", async () => {
@@ -148,5 +158,64 @@ describe("SendEmailButton", () => {
         "new@example.com",
       );
     });
+  });
+
+  it("'Generate custom draft instead' replaces the body with the AI-generated content", async () => {
+    mockGetCurrentProfileId.mockResolvedValue("profile-1");
+    mockGenerateColdEmail.mockResolvedValue({
+      success: true,
+      content: "A fully custom AI-written cold email.",
+    });
+    const user = userEvent.setup();
+    render(
+      <SendEmailButton
+        jobId="job-1"
+        jobTitle="Backend Engineer"
+        companyName="Acme GmbH"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /send email/i }));
+    await screen.findByLabelText(/^to$/i);
+    await user.click(
+      screen.getByRole("button", { name: /generate custom draft instead/i }),
+    );
+
+    expect(mockGenerateColdEmail).toHaveBeenCalledWith("profile-1", "job-1");
+    await waitFor(() => {
+      expect(screen.getByLabelText(/body/i)).toHaveValue(
+        "A fully custom AI-written cold email.",
+      );
+    });
+  });
+
+  it("shows an error and keeps the template body when generating a custom draft fails", async () => {
+    mockGetCurrentProfileId.mockResolvedValue("profile-1");
+    mockGenerateColdEmail.mockResolvedValue({
+      success: false,
+      message: "No resume found.",
+    });
+    const user = userEvent.setup();
+    render(
+      <SendEmailButton
+        jobId="job-1"
+        jobTitle="Backend Engineer"
+        companyName="Acme GmbH"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /send email/i }));
+    await screen.findByLabelText(/^to$/i);
+    const templateBody = fillColdEmailTemplate("Backend Engineer", "Acme GmbH");
+    await user.click(
+      screen.getByRole("button", { name: /generate custom draft instead/i }),
+    );
+
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({ variant: "destructive" }),
+      );
+    });
+    expect(screen.getByLabelText(/body/i)).toHaveValue(templateBody);
   });
 });

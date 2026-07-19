@@ -85,6 +85,16 @@ a past session's account was accurate.
    real `dev.db` (not just the optimistic UI — see ARCHITECTURE.md for a
    false-positive this caught and fixed). Full detail in ARCHITECTURE.md's
    "Send Email + Mark as Applied" section.
+9. **Static (non-AI) cold-email template** (`feature/email-template`) —
+   Send Email's default body is now an instant, no-Ollama-call static
+   template (`src/lib/coldEmailTemplate.ts`, verbatim German+English text
+   the user supplied, `[Job Title]`/`[Company Name]` filled by plain string
+   substitution). Full AI generation kept as an opt-in "Generate custom
+   draft instead" button in the same dialog. Verified via a real Playwright
+   click-through (fixture deleted after): both language sections filled
+   correctly, Gmail-redirect decoding confirmed exact full-body match. Fast,
+   scoped task — full detail in ARCHITECTURE.md's "Static cold-email
+   template" section.
 
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**

@@ -416,3 +416,15 @@ Format: Decision — Rationale
   proof without real Google credentials: it confirms Google's servers
   received the exact correct compose parameters, not that Gmail's own
   compose UI visually renders them (that step needs the user's real login).
+
+- **`feature/email-template`: the Send Email button's default body is now a
+  fixed, user-supplied static template (German section, then an "English
+  version;" separator, then English) with `[Job Title]`/`[Company Name]`
+  filled by plain string substitution — no Ollama call, instant.** Stored
+  verbatim in `src/lib/coldEmailTemplate.ts`, including the deliberate
+  German/English sign-off difference ("Dhruvil" vs "Dhruvil Akbari") — not a
+  typo to fix. `generateColdEmail` (full AI) is kept as an opt-in "Generate
+  custom draft instead" button inside the same dialog rather than removed;
+  it always re-generates fresh rather than reusing a previously-saved
+  `ColdEmail`, since the task scoped this as fast/minimal and a stale-vs-
+  fresh cache policy wasn't asked for.
