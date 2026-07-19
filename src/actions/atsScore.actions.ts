@@ -10,11 +10,11 @@ import {
   ATS_KEYWORDS_SYSTEM_PROMPT,
   buildAtsKeywordsPrompt,
   checkRateLimit,
+  resolveDefaultAi,
 } from "@/lib/ai";
-import { DEFAULT_OLLAMA_MODEL, TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
+import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails, resolveJobLanguage } from "@/actions/job.actions";
-import { defaultUserSettings } from "@/models/userSettings.model";
 import { scoreResumeAgainstKeywords } from "@/lib/ats";
 import { APP_CONSTANTS } from "@/lib/constants";
 
@@ -55,8 +55,8 @@ export const getJobKeywords = async (jobId: string): Promise<any | undefined> =>
   }
 };
 
-// Extracts ATS keywords from the job description via the local/configured
-// AI model (same non-streaming getModel + generateText convention as
+// Extracts ATS keywords from the job description via the configured AI
+// model (same non-streaming getModel + generateText convention as
 // automation.actions.ts's analyzeDiscoveredJob). Replaces any previously
 // *extracted* keywords but leaves manually-added ones untouched.
 export const extractJobKeywords = async (jobId: string): Promise<any | undefined> => {
@@ -66,7 +66,7 @@ export const extractJobKeywords = async (jobId: string): Promise<any | undefined
       throw new Error("Not authenticated");
     }
 
-    // Same limiter the AI API routes use — extraction is a slow local Ollama
+    // Same limiter the AI API routes use — extraction is a multi-second AI
     // call, so rapid duplicate clicks would stack them.
     const rateLimit = checkRateLimit(user.id);
     if (!rateLimit.allowed) {
@@ -85,17 +85,8 @@ export const extractJobKeywords = async (jobId: string): Promise<any | undefined
       throw new Error(jobPre.error.message);
     }
 
-    const userSettings = await prisma.userSettings.findUnique({
-      where: { userId: user.id },
-    });
-    const ai = userSettings
-      ? {
-          ...defaultUserSettings.ai,
-          ...(JSON.parse(userSettings.settings).ai ?? {}),
-        }
-      : defaultUserSettings.ai;
-
-    const model = await getModel(ai.provider, ai.model || DEFAULT_OLLAMA_MODEL, user.id);
+    const ai = await resolveDefaultAi(user.id);
+    const model = await getModel(ai.provider, ai.model, user.id);
 
     const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
 

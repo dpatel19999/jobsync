@@ -21,32 +21,11 @@ import {
   buildTailoredSummaryPromptDe,
   generateVerifiedContent,
   checkRateLimit,
+  resolveDefaultAi,
 } from "@/lib/ai";
-import { DEFAULT_GEMINI_MODEL, DEFAULT_OLLAMA_MODEL, TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
+import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails, resolveJobLanguage } from "@/actions/job.actions";
-import { defaultUserSettings } from "@/models/userSettings.model";
-import { AiProvider } from "@/models/ai.model";
-
-// Cover letter + tailored summary generation default to Gemini (cloud, fast)
-// unless the user has explicitly saved a provider in AI Settings — e.g.
-// switching to Ollama for offline/no-cloud use. ATS keyword extraction and
-// cold email generation are untouched and keep the app-wide Ollama default
-// (defaultUserSettings.ai) since they weren't part of this change.
-async function resolveCoverLetterAi(userId: string) {
-  const userSettings = await prisma.userSettings.findUnique({
-    where: { userId },
-  });
-  const savedAi = userSettings
-    ? (JSON.parse(userSettings.settings).ai as { provider?: AiProvider; model?: string } | undefined)
-    : undefined;
-
-  const provider = savedAi?.provider ?? AiProvider.GEMINI;
-  const defaultModelForProvider =
-    provider === AiProvider.OLLAMA ? DEFAULT_OLLAMA_MODEL : DEFAULT_GEMINI_MODEL;
-
-  return { provider, model: savedAi?.model || defaultModelForProvider };
-}
 
 export const getCoverLetterList = async (
   page: number = 1,
@@ -212,8 +191,8 @@ export const generateColdEmail = async (
       throw new Error("Not authenticated");
     }
 
-    // Same limiter the AI API routes use — the generate button triggers slow
-    // (30s+) local Ollama calls, so rapid duplicate clicks would stack them.
+    // Same limiter the AI API routes use — the generate button triggers a
+    // multi-second AI call, so rapid duplicate clicks would stack them.
     const rateLimit = checkRateLimit(user.id);
     if (!rateLimit.allowed) {
       throw new Error(
@@ -274,17 +253,8 @@ export const generateColdEmail = async (
       throw new Error(jobPre.error.message);
     }
 
-    const userSettings = await prisma.userSettings.findUnique({
-      where: { userId: user.id },
-    });
-    const ai = userSettings
-      ? {
-          ...defaultUserSettings.ai,
-          ...(JSON.parse(userSettings.settings).ai ?? {}),
-        }
-      : defaultUserSettings.ai;
-
-    const model = await getModel(ai.provider, ai.model || DEFAULT_OLLAMA_MODEL, user.id);
+    const ai = await resolveDefaultAi(user.id);
+    const model = await getModel(ai.provider, ai.model, user.id);
 
     const companyName = job.Company?.label ?? "the company";
 
@@ -409,7 +379,7 @@ export const generateCoverLetter = async (
       throw new Error(jobPre.error.message);
     }
 
-    const ai = await resolveCoverLetterAi(user.id);
+    const ai = await resolveDefaultAi(user.id);
     const model = await getModel(ai.provider, ai.model, user.id);
 
     const companyName = job.Company?.label ?? "the company";
@@ -531,7 +501,7 @@ export const generateTailoredSummary = async (
       throw new Error(jobPre.error.message);
     }
 
-    const ai = await resolveCoverLetterAi(user.id);
+    const ai = await resolveDefaultAi(user.id);
     const model = await getModel(ai.provider, ai.model, user.id);
 
     const language = await resolveJobLanguage(

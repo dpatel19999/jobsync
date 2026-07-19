@@ -1,4 +1,5 @@
 export { getModel, type ProviderType } from "./providers";
+export { resolveDefaultAi } from "./default-provider";
 export type {
   JobMatchScores,
   JobMatchResult,

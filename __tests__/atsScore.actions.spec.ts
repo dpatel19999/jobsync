@@ -35,12 +35,14 @@ const {
   preprocessJobMock,
   checkRateLimitMock,
   resolveJobLanguageMock,
+  resolveDefaultAiMock,
 } = vi.hoisted(() => ({
   getModelMock: vi.fn(),
   preprocessResumeMock: vi.fn(),
   preprocessJobMock: vi.fn(),
   checkRateLimitMock: vi.fn(),
   resolveJobLanguageMock: vi.fn(),
+  resolveDefaultAiMock: vi.fn(),
 }));
 vi.mock("@/actions/job.actions", () => ({
   getJobDetails: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock("@/lib/ai", () => ({
   ATS_KEYWORDS_SYSTEM_PROMPT: "ATS_SYSTEM",
   buildAtsKeywordsPrompt: (jobText: string) => `ATS_PROMPT:${jobText.length}`,
   checkRateLimit: checkRateLimitMock,
+  resolveDefaultAi: resolveDefaultAiMock,
 }));
 
 const VALID_USER = { id: "user-1", name: "Test", email: "test@test.com" };
@@ -75,9 +78,30 @@ describe("extractJobKeywords — edge cases", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (getCurrentUser as any).mockResolvedValue(VALID_USER);
-    (prisma.userSettings.findUnique as any).mockResolvedValue(null);
+    resolveDefaultAiMock.mockResolvedValue({ provider: "gemini", model: "gemini-flash-latest" });
     getModelMock.mockResolvedValue({ modelId: "mock-model" });
     checkRateLimitMock.mockReturnValue({ allowed: true, remaining: 4, resetIn: 60000 });
+  });
+
+  it("defaults to Gemini when the user has no saved AI settings", async () => {
+    (getJobDetails as any).mockResolvedValue({ success: true, job: { id: "job-1" } });
+    preprocessJobMock.mockResolvedValue({ success: true, data: { normalizedText: "A".repeat(300) } });
+    (generateText as any).mockResolvedValue({ text: "Node.js\nAWS" });
+    (prisma.jobKeyword.findMany as any).mockResolvedValue([]);
+
+    await extractJobKeywords("job-1");
+    expect(getModelMock).toHaveBeenCalledWith("gemini", "gemini-flash-latest", VALID_USER.id);
+  });
+
+  it("uses the user's saved Ollama preference instead of the Gemini default", async () => {
+    resolveDefaultAiMock.mockResolvedValue({ provider: "ollama", model: "llama3.2:3b" });
+    (getJobDetails as any).mockResolvedValue({ success: true, job: { id: "job-1" } });
+    preprocessJobMock.mockResolvedValue({ success: true, data: { normalizedText: "A".repeat(300) } });
+    (generateText as any).mockResolvedValue({ text: "Node.js\nAWS" });
+    (prisma.jobKeyword.findMany as any).mockResolvedValue([]);
+
+    await extractJobKeywords("job-1");
+    expect(getModelMock).toHaveBeenCalledWith("ollama", "llama3.2:3b", VALID_USER.id);
   });
 
   it("fails cleanly when the job is not found", async () => {
@@ -112,9 +136,7 @@ describe("extractJobKeywords — edge cases", () => {
       success: true,
       data: { normalizedText: "J".repeat(5000) },
     });
-    (prisma.userSettings.findUnique as any).mockResolvedValue({
-      settings: JSON.stringify({ ai: { provider: "ollama", model: "llama3.1" } }),
-    });
+    resolveDefaultAiMock.mockResolvedValue({ provider: "ollama", model: "llama3.1" });
     (generateText as any).mockResolvedValue({ text: "Node.js\nAWS\nDocker" });
     (prisma.jobKeyword.findMany as any).mockResolvedValue([]);
 
