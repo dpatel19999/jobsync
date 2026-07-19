@@ -22,7 +22,7 @@ import {
   generateVerifiedContent,
   checkRateLimit,
 } from "@/lib/ai";
-import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
+import { DEFAULT_OLLAMA_MODEL, TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails, resolveJobLanguage } from "@/actions/job.actions";
 import { defaultUserSettings } from "@/models/userSettings.model";
@@ -263,7 +263,7 @@ export const generateColdEmail = async (
         }
       : defaultUserSettings.ai;
 
-    const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
+    const model = await getModel(ai.provider, ai.model || DEFAULT_OLLAMA_MODEL, user.id);
 
     const companyName = job.Company?.label ?? "the company";
 
@@ -398,7 +398,7 @@ export const generateCoverLetter = async (
         }
       : defaultUserSettings.ai;
 
-    const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
+    const model = await getModel(ai.provider, ai.model || DEFAULT_OLLAMA_MODEL, user.id);
 
     const companyName = job.Company?.label ?? "the company";
 
@@ -529,7 +529,7 @@ export const generateTailoredSummary = async (
         }
       : defaultUserSettings.ai;
 
-    const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
+    const model = await getModel(ai.provider, ai.model || DEFAULT_OLLAMA_MODEL, user.id);
 
     const language = await resolveJobLanguage(
       user.id,

@@ -11,7 +11,7 @@ import {
   buildAtsKeywordsPrompt,
   checkRateLimit,
 } from "@/lib/ai";
-import { TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
+import { DEFAULT_OLLAMA_MODEL, TEMPERATURES, truncateForProvider } from "@/lib/ai/config";
 import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails, resolveJobLanguage } from "@/actions/job.actions";
 import { defaultUserSettings } from "@/models/userSettings.model";
@@ -84,7 +84,7 @@ export const extractJobKeywords = async (jobId: string): Promise<any | undefined
         }
       : defaultUserSettings.ai;
 
-    const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
+    const model = await getModel(ai.provider, ai.model || DEFAULT_OLLAMA_MODEL, user.id);
 
     const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
 

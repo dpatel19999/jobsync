@@ -55,6 +55,15 @@ export const TEXT_LIMITS = {
   },
 } as const;
 
+// DEFAULT MODEL
+/**
+ * Fallback Ollama model used by the non-streaming generation actions (cold
+ * email, cover letter, tailored summary, ATS keyword extraction) when the
+ * user has no model configured in their settings. Previously duplicated as
+ * an inline "llama3.2" string in each action file.
+ */
+export const DEFAULT_OLLAMA_MODEL = "llama3.2:3b";
+
 // SCORE VARIANCE
 export const SCORE_VARIANCE = {
   /** Default allowed variance from baseline score */
