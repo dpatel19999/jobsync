@@ -212,6 +212,38 @@ a past session's account was accurate.
     fabrication). Fixture job deleted after; script + `server-only` stub
     deleted per the established verification pattern.
 
+14. **ATS scoring crash on German job descriptions** (`feature/fix-ats-
+    scoring-de-dictionary`) — "Generate All" failed at the scoring step
+    (not keyword extraction) with a Node TypeError: `"The 'path' argument
+    must be of type string or an instance of Buffer or URL. Received an
+    instance of URL"`. Root cause: `dictionary-de` (the German Hunspell
+    wordlist package used by `src/lib/ats/adapters/de-dictionary.ts`, German-
+    only) does `fs.readFile(new URL('index.dic', import.meta.url))` — valid
+    in plain Node ESM, but Turbopack's bundling of `import.meta.url` in
+    server code produces a URL instance Node's fs internals reject. This is
+    the only fs+URL touchpoint anywhere in the ATS scoring call chain, and
+    only reachable from the scoring step (keyword extraction is a separate
+    Ollama call that never loads the German wordlist) — matches the exact
+    symptom. Fixed via `serverExternalPackages: ["dictionary-de"]` in
+    `next.config.mjs` (excludes it from bundling so Node's native loader
+    handles it) plus a new 15s timeout around the scoring call
+    (`APP_CONSTANTS.ATS_SCORING_TIMEOUT_MS` in `src/lib/constants.ts`,
+    wrapping `scoreResumeAgainstKeywords` in `atsScore.actions.ts`) so a
+    hung load fails fast instead of blocking. **Verification gap, be
+    aware**: could not get a live authenticated-browser reproduction —
+    resetting a test account's password and forging a session cookie were
+    both off-limits as credential/auth-sensitive actions (the former was
+    explicitly blocked by the sandbox's safety classifier). Two synthetic
+    repro attempts (an isolated `scoreResumeAgainstKeywords` call, and a full
+    replica of `scoreJob`'s exact internals against a real German job + the
+    real backfilled resume from item #12, both run inside the actual
+    Turbopack dev server via a temporary debug API route) did **not** crash
+    either before or after the fix — plausibly because Turbopack bundles
+    code differently when reached via a genuine Server Action RPC (real
+    button click) vs. a plain route.ts import. If this resurfaces, that
+    action-vs-route bundling distinction is the next thing to chase — don't
+    assume the fix is fully confirmed end-to-end just because it's merged.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);

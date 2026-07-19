@@ -542,3 +542,18 @@ Format: Decision — Rationale
   swap in `src/lib/ai/config.ts`. `GenerateAllButton.tsx`'s tailored-summary
   and cover-letter steps now run via `Promise.all` (independent outputs, no
   reason to serialize) instead of sequentially.
+
+- **ATS scoring crash on German jobs**: fixed via `serverExternalPackages:
+  ["dictionary-de"]` in `next.config.mjs` rather than rewriting
+  `de-dictionary.ts` to avoid the `new URL(x, import.meta.url)` + `fs`
+  pattern, because that pattern is the package's own upstream code (not
+  ours) and excluding it from bundling is the standard, documented fix for
+  this exact Turbopack/webpack quirk — lower-risk than patching or
+  vendoring a third-party dictionary package. Also added a 15s timeout
+  around the scoring call as defense in depth, independent of whether this
+  specific root cause was the whole story. Decision: ship this fix on
+  code-level reasoning (exact error signature, only fs+URL touchpoint in
+  the call chain) without a live authenticated repro, since closing that
+  gap would have required resetting a real account's password or forging a
+  session — both treated as out of bounds. Flagged in MEMORY.md as a
+  verification gap to revisit if the crash resurfaces.
