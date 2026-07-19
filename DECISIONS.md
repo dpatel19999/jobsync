@@ -571,3 +571,18 @@ Format: Decision — Rationale
   key hit a 20-requests/day free-tier quota wall mid-E2E-test — Generate
   All's ~4 base calls plus guardrail fact-check calls can exhaust that in
   2-3 runs. Not fixed here; flagged for whoever revisits this next.
+
+- **gemini-flash-lite-latest + automatic Ollama fallback**: switched
+  `DEFAULT_GEMINI_MODEL` to a Flash-Lite variant (materially higher free-
+  tier daily quota, verified live) rather than paying for a Gemini tier or
+  building per-user quota tracking — simplest fix that directly addresses
+  the observed failure mode. Also added `callWithGeminiFallback()` as
+  defense in depth: even a higher quota can be exhausted under heavier
+  real usage, so every Gemini call site now retries once against Ollama on
+  a 429/quota error rather than failing the step outright, with a visible
+  "using offline mode" note so the fallback is never silent. Decision: the
+  `run` callback receives the provider being attempted (not just the
+  resolved model) so callers re-truncate prompt text with the correct
+  per-provider budget on each attempt, including the fallback — Ollama's
+  smaller context budget is respected even mid-fallback, not just on a
+  native Ollama call.

@@ -273,6 +273,42 @@ a past session's account was accurate.
     necessary; don't assume "Ollama lag is gone" fully solves the UX problem
     without also solving for this.
 
+16. **gemini-flash-lite-latest + automatic Ollama fallback on quota**
+    (`feature/gemini-flash-lite-with-ollama-fallback`) — item #15's
+    `gemini-flash-latest` hit its free-tier daily cap (20 req/day on the
+    underlying `gemini-3.5-flash`) mid-session; too low for real usage since
+    Generate All burns ~4-6 calls per run including guardrail fact-checks.
+    Fixed two ways:
+    1. `DEFAULT_GEMINI_MODEL` → `"gemini-flash-lite-latest"` — verified live
+       with 8/8 consecutive successful calls (no 429) at a point where the
+       old model was already exhausted for the day, plus one quality-checked
+       keyword-extraction call (17 sensible keywords, 643ms).
+    2. **Automatic Ollama fallback**: `callWithGeminiFallback()` (new
+       `src/lib/ai/default-provider.ts`) wraps every AI call site — on a
+       Gemini 429/quota error (`isGeminiQuotaError`, checks `statusCode`
+       both directly and nested under `.lastError` for the AI SDK's
+       `RetryError` shape, plus a text fallback for "quota"/
+       "RESOURCE_EXHAUSTED") it retries once against Ollama instead of
+       failing outright. Never triggers for an explicitly-chosen non-Gemini
+       provider. Each action returns `usedOfflineFallback`; wired into a
+       small non-blocking "Using offline mode — Gemini quota reached." note
+       on all 5 individual generate buttons + `GenerateAllButton`'s per-step
+       notes and final toast.
+    **Real E2E, this time clean**: ran the actual 5-step sequence for real
+    (fixture job, real backfilled resume) — **ALL 5 STEPS PASSED, NO 429,
+    7.4s total wall-clock** (0.8s extraction, 46ms local scoring, 4.9s
+    parallel summary+cover letter, 1.6s cold email). Massive improvement
+    over both the original Ollama baseline (~20.6 min) and the exhausted
+    `gemini-flash-latest` attempt (failed after step 1). Fixture cleaned up,
+    zero leftovers.
+    **Still worth watching**: Flash-Lite's free-tier quota is higher but not
+    unlimited — if it's ever exhausted too under heavier real usage, the
+    Ollama fallback should catch it (now genuinely tested, not just coded),
+    but that means a slow Ollama load could still occasionally happen. Not
+    a regression from the original complaint (Ollama only loads when Gemini
+    actually fails, not on every run) — just don't assume the RAM-lag
+    complaint is 100% permanently eliminated under all load conditions.
+
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
 under full-suite parallel load (CPU contention across ~97 test files);
