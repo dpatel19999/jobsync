@@ -127,6 +127,23 @@ a past session's account was accurate.
     paraphrase-level claims (same pattern as cold email — not a new bug).
     Full detail in ARCHITECTURE.md's "Cover letter generation + resume
     tailoring" section.
+11. **"Generate All" button** (`feature/generate-all`) — pure client-side
+    sequencer, no new guardrail/AI logic: `extractJobKeywords` → `scoreJob`
+    → `generateTailoredSummary` → `generateCoverLetter` → `generateColdEmail`
+    (skipped if `job.ColdEmail` already exists), stopping on first failure
+    with earlier results kept (no rollback — each step already persists
+    independently). Added alongside every existing individual button, not
+    replacing any. Progress dialog shows "Step X of 5: [name]..." live,
+    updating per step, plus a per-step status list; `router.refresh()` on
+    success so other page sections show fresh data without a manual reload.
+    Verified two ways: `GenerateAllButton.spec.tsx` (real RTL component
+    render + click, mocked actions) proves the sequencing/skip/stop-on-
+    failure logic; a real, temporary script against local Ollama + real
+    `dev.db` (deleted after) ran all 5 steps for real on one fresh fixture
+    job — ~81s keyword extraction, ~69ms scoring, ~311s tailored summary,
+    ~524s cover letter, ~322s cold email (**~20.6 min total**) — and
+    confirmed all 5 outputs correctly saved together on one Job row. Full
+    detail in ARCHITECTURE.md's "'Generate All'" section.
 
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**

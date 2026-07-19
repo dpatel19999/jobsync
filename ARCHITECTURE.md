@@ -451,3 +451,36 @@ Not built (out of scope for this pass, not requested): a "save my edits
 back" action for the tailored-summary textarea — the field regenerates the
 same way each time; user edits are copy-paste-out only, matching the
 explicit requirement not to auto-edit the resume.
+
+## "Generate All" (done, branch `feature/generate-all`)
+
+`GenerateAllButton.tsx`, added to the job detail page alongside (not
+replacing) every individual generate button. Pure sequencer, no new
+guardrail/AI logic: runs `extractJobKeywords` → `scoreJob` →
+`generateTailoredSummary` → `generateCoverLetter` → `generateColdEmail` in
+order, awaiting each and checking `.success`. `generateColdEmail` is
+skipped if `job.ColdEmail` already exists (checked via a `hasColdEmail`
+prop derived from `!!job.ColdEmail` at render time). A failure at any step
+stops the sequence immediately — since every action persists its own
+result independently, whatever succeeded before the failure stays saved;
+no rollback exists or is needed.
+
+Progress UI: a `StepState[]` array (`pending`/`running`/`done`/`error`/
+`skipped`) rendered in a dialog, with a headline ("Step X of 5: [name]...",
+"Failed at step X of 5: [name]", or "All steps completed.") plus a
+per-step list showing status icon + any error message. On success,
+`router.refresh()` runs once so the page's other sections (ATS score,
+tailored summary, cover letter/cold email buttons) reflect the fresh data
+without a manual reload.
+
+**Verified two ways**: `GenerateAllButton.spec.tsx` (React Testing Library,
+real component render + real click) proves the sequencing, the
+skip-on-existing-ColdEmail branch, and stop-on-failure/keep-earlier-results
+behavior, with the five underlying actions mocked. A real, temporary script
+(`scripts/verify-generate-all.ts`, deleted after use) replicated the same
+five actions in the same order against a real fresh job + real Ollama +
+real `dev.db`: ~81s keyword extraction (11 keywords), ~69ms scoring (real
+score 55, no Ollama call), ~311s tailored summary, ~524s cover letter (192
+words), ~322s cold email (112 words) — **~20.6 minutes end to end**. Final
+DB read confirmed all five outputs correctly saved together on one Job row
+with no cross-step clobbering.

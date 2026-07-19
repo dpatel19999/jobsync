@@ -479,3 +479,36 @@ Format: Decision — Rationale
   content was still returned with the warning surfaced, per the
   warn-don't-block design. All fixture rows (job, cover letter, profile,
   job title, company) cleaned up afterward.
+
+- **`feature/generate-all`: "Generate All" is a pure client-side sequencer,
+  zero new business logic** — `GenerateAllButton.tsx` just calls
+  `extractJobKeywords` → `scoreJob` → `generateTailoredSummary` →
+  `generateCoverLetter` → `generateColdEmail` (skipped if `job.ColdEmail`
+  already exists) in order, checking `.success` after each and stopping on
+  the first failure. No rollback logic needed or added — each action
+  already persists its own result independently, so a failure partway
+  through simply leaves earlier steps' results saved, which is what "don't
+  roll back" asked for by construction.
+- Progress state is a plain `StepState[]` array (`pending`/`running`/
+  `done`/`error`/`skipped`) driven entirely by the sequencer's own
+  `updateStep` calls between awaits — no polling, no separate progress
+  action. `router.refresh()` runs once at the end (success path only) so
+  the other job-detail sections (ATS score, tailored summary, cover
+  letter/cold email buttons) pick up the fresh data without a manual reload.
+- **Verified two ways**: (1) `GenerateAllButton.spec.tsx` renders the real
+  component with React Testing Library and drives a real click — this
+  proves the actual sequencing, the skip-on-existing-ColdEmail branch, and
+  the stop-on-failure/keep-earlier-results behavior as real component state
+  transitions, with the five actions mocked. (2) A real, temporary script
+  (`scripts/verify-generate-all.ts`, deleted after use) replicated the same
+  five actions' internal steps in the same order against a real fresh
+  fixture job + real Ollama + real `dev.db` (same auth-bypass reason as
+  the prior two verification scripts this session — `getCurrentUser()`
+  needs a real Next.js request context). Real timings: keyword extraction
+  ~81s (11 keywords), scoring ~69ms (score 55, real ATS core, no Ollama),
+  tailored summary ~311s, cover letter ~524s (192 words), cold email ~322s
+  (112 words) — **~20.6 minutes total**. Final DB read confirmed all five
+  outputs correctly saved together on one Job row (`Keywords`, `atsScore`,
+  `tailoredSummary`, `coverLetterId`→`CoverLetter.content`,
+  `coldEmailId`→`ColdEmail.content`) with no clobbering between steps.
+  Fixture rows cleaned up afterward.
