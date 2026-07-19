@@ -16,6 +16,17 @@ import { getResumeById } from "@/actions/profile.actions";
 import { getJobDetails, resolveJobLanguage } from "@/actions/job.actions";
 import { defaultUserSettings } from "@/models/userSettings.model";
 import { scoreResumeAgainstKeywords } from "@/lib/ats";
+import { APP_CONSTANTS } from "@/lib/constants";
+
+// Races a promise against a hard timeout so a hung dependency load (e.g. the
+// German ATS adapter's lazy Hunspell wordlist import) fails fast with a
+// clear message instead of blocking the request indefinitely.
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
 
 export const getJobKeywords = async (jobId: string): Promise<any | undefined> => {
   try {
@@ -242,11 +253,15 @@ export const scoreJob = async (jobId: string): Promise<any | undefined> => {
       jobPre.data.normalizedText,
     );
 
-    const result = await scoreResumeAgainstKeywords(
-      resumePre.data.normalizedText,
-      keywords.map((k) => k.text),
-      jobPre.data.normalizedText,
-      language,
+    const result = await withTimeout(
+      scoreResumeAgainstKeywords(
+        resumePre.data.normalizedText,
+        keywords.map((k) => k.text),
+        jobPre.data.normalizedText,
+        language,
+      ),
+      APP_CONSTANTS.ATS_SCORING_TIMEOUT_MS,
+      "Scoring timed out. Please try again.",
     );
 
     const atsScoreData = JSON.stringify({

@@ -47,6 +47,19 @@ vi.mock("@/actions/job.actions", () => ({
   resolveJobLanguage: resolveJobLanguageMock,
 }));
 vi.mock("@/actions/profile.actions", () => ({ getResumeById: vi.fn() }));
+
+const { scoreResumeAgainstKeywordsMock } = vi.hoisted(() => ({
+  scoreResumeAgainstKeywordsMock: vi.fn(),
+}));
+vi.mock("@/lib/ats", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ats")>();
+  // Defaults to the real scoring pipeline so every existing test keeps
+  // exercising real EN/DE tokenization; individual tests override with
+  // mockImplementationOnce to simulate a hang.
+  scoreResumeAgainstKeywordsMock.mockImplementation(actual.scoreResumeAgainstKeywords);
+  return { ...actual, scoreResumeAgainstKeywords: scoreResumeAgainstKeywordsMock };
+});
+
 vi.mock("@/lib/ai", () => ({
   getModel: getModelMock,
   preprocessResume: preprocessResumeMock,
@@ -209,5 +222,32 @@ describe("scoreJob — edge cases", () => {
       expect.objectContaining({ id: "job-1", language: "de" }),
       "Wir suchen einen Entwickler mit Node.js Erfahrung.",
     );
+  });
+
+  it("times out with a clear message instead of hanging if scoring stalls (e.g. a slow dependency load)", async () => {
+    vi.useFakeTimers();
+    try {
+      (getJobDetails as any).mockResolvedValue({ success: true, job: { id: "job-1", resumeId: "resume-1" } });
+      (prisma.jobKeyword.findMany as any).mockResolvedValue([{ id: "k1", text: "Node.js" }]);
+      (getResumeById as any).mockResolvedValue({ success: true, data: { id: "resume-1", title: "My Resume" } });
+      preprocessResumeMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "Experience with Node.js." },
+      });
+      preprocessJobMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "We need a Node.js developer." },
+      });
+      scoreResumeAgainstKeywordsMock.mockImplementationOnce(() => new Promise(() => {}));
+
+      const resultPromise = scoreJob("job-1");
+      await vi.advanceTimersByTimeAsync(15000);
+      const result = await resultPromise;
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/timed out/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

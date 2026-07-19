@@ -114,6 +114,12 @@ export const APP_CONSTANTS = {
   RESUME_IMPORT_MAX_DOCX_UNCOMPRESSED_BYTES: 100 * 1024 * 1024, // 100 MB
   RESUME_IMPORT_EXTRACT_TIMEOUT_MS: 30_000, // 30 seconds
 
+  // ATS keyword scoring — local computation (no AI call), but the German
+  // adapter lazily loads a ~1MB Hunspell wordlist on first use; a hard
+  // timeout keeps a hung load from blocking the UI or spiking CPU instead of
+  // failing fast with a clear error.
+  ATS_SCORING_TIMEOUT_MS: 15_000, // 15 seconds
+
   // Resizable panel (AI job match / resume review sheets)
   RESIZABLE_PANEL_DEFAULT_WIDTH: 450,
   RESIZABLE_PANEL_MIN_WIDTH: 320,
