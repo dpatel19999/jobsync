@@ -20,6 +20,14 @@ export {
   buildColdEmailPromptDe,
   ATS_KEYWORDS_SYSTEM_PROMPT,
   buildAtsKeywordsPrompt,
+  COVER_LETTER_SYSTEM_PROMPT,
+  buildCoverLetterPrompt,
+  COVER_LETTER_SYSTEM_PROMPT_DE,
+  buildCoverLetterPromptDe,
+  TAILORED_SUMMARY_SYSTEM_PROMPT,
+  buildTailoredSummaryPrompt,
+  TAILORED_SUMMARY_SYSTEM_PROMPT_DE,
+  buildTailoredSummaryPromptDe,
 } from "./prompts";
 
 // Analysis tools

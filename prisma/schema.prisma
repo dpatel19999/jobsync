@@ -351,6 +351,11 @@ model Job {
   // MCP provenance: which agent/token created this job (null = UI or automation)
   createdVia      String?
 
+  // Resume tailoring: AI-generated 2-3 sentence summary highlighting resume
+  // experience relevant to this specific job. Editable/copyable on the job
+  // detail page — never written back into the actual resume.
+  tailoredSummary String?
+
   @@index([userId, automationId])
   @@index([userId, discoveryStatus])
   // Also has a hand-written partial unique index (not expressible here):

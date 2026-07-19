@@ -11,6 +11,14 @@ import {
   buildColdEmailPrompt,
   COLD_EMAIL_SYSTEM_PROMPT_DE,
   buildColdEmailPromptDe,
+  COVER_LETTER_SYSTEM_PROMPT,
+  buildCoverLetterPrompt,
+  COVER_LETTER_SYSTEM_PROMPT_DE,
+  buildCoverLetterPromptDe,
+  TAILORED_SUMMARY_SYSTEM_PROMPT,
+  buildTailoredSummaryPrompt,
+  TAILORED_SUMMARY_SYSTEM_PROMPT_DE,
+  buildTailoredSummaryPromptDe,
   generateVerifiedContent,
   checkRateLimit,
 } from "@/lib/ai";
@@ -302,6 +310,259 @@ export const generateColdEmail = async (
     return { success: true, data: coldEmail, content, warning };
   } catch (error) {
     const msg = "Failed to generate cold email.";
+    return handleError(error, msg);
+  }
+};
+
+// Generates a standard cover letter for a specific job, following the exact
+// same pattern as generateColdEmail (guardrail pipeline, rate limiting,
+// resume resolution, EN/DE prompt routing via the persisted Job.language),
+// then saves it as a CoverLetter linked to the job.
+export const generateCoverLetter = async (
+  profileId: string,
+  jobId: string
+): Promise<any | undefined> => {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    const rateLimit = checkRateLimit(user.id);
+    if (!rateLimit.allowed) {
+      throw new Error(
+        `Too many AI requests. Please wait ${Math.ceil(rateLimit.resetIn / 1000)} seconds and try again.`
+      );
+    }
+
+    const profile = await prisma.profile.findFirst({
+      where: { id: profileId, userId: user.id },
+    });
+    if (!profile) {
+      throw new Error("Profile not found");
+    }
+
+    const { job, success: jobSuccess } = await getJobDetails(jobId);
+    if (!jobSuccess || !job) {
+      throw new Error("Job not found");
+    }
+
+    const userRow = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { defaultResumeId: true },
+    });
+
+    let resumeId: string | null =
+      job.resumeId ?? userRow?.defaultResumeId ?? null;
+
+    if (!resumeId) {
+      const fallbackResume = await prisma.resume.findFirst({
+        where: { profileId },
+        orderBy: { createdAt: "desc" },
+      });
+      resumeId = fallbackResume?.id ?? null;
+    }
+
+    if (!resumeId) {
+      throw new Error(
+        "No resume found to generate a cover letter from. Attach a resume to this job or add one to your profile first."
+      );
+    }
+
+    const { data: resume, success: resumeSuccess } = await getResumeById(
+      resumeId
+    );
+    if (!resumeSuccess || !resume) {
+      throw new Error("Resume not found");
+    }
+
+    const [resumePre, jobPre] = await Promise.all([
+      preprocessResume(resume),
+      preprocessJob(job),
+    ]);
+
+    if (!resumePre.success) {
+      throw new Error(resumePre.error.message);
+    }
+    if (!jobPre.success) {
+      throw new Error(jobPre.error.message);
+    }
+
+    const userSettings = await prisma.userSettings.findUnique({
+      where: { userId: user.id },
+    });
+    const ai = userSettings
+      ? {
+          ...defaultUserSettings.ai,
+          ...(JSON.parse(userSettings.settings).ai ?? {}),
+        }
+      : defaultUserSettings.ai;
+
+    const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
+
+    const companyName = job.Company?.label ?? "the company";
+
+    const language = await resolveJobLanguage(
+      user.id,
+      job,
+      jobPre.data.normalizedText,
+    );
+
+    const resumeText = truncateForProvider(resumePre.data.normalizedText, ai.provider, "RESUME");
+    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
+
+    const { content, warning } = await generateVerifiedContent({
+      model,
+      system: language === "de" ? COVER_LETTER_SYSTEM_PROMPT_DE : COVER_LETTER_SYSTEM_PROMPT,
+      prompt:
+        language === "de"
+          ? buildCoverLetterPromptDe(resumeText, jobText, companyName)
+          : buildCoverLetterPrompt(resumeText, jobText, companyName),
+      temperature: TEMPERATURES.FEEDBACK,
+      facts: {
+        resumeText,
+        jobText,
+      },
+      language,
+    });
+
+    const title = `${companyName} - ${job.JobTitle?.label ?? "Cover Letter"}`;
+
+    const coverLetter = await prisma.coverLetter.create({
+      data: { profileId, title, content },
+    });
+
+    await prisma.job.update({
+      where: { id: jobId, userId: user.id },
+      data: { coverLetterId: coverLetter.id },
+    });
+
+    return { success: true, data: coverLetter, content, warning };
+  } catch (error) {
+    const msg = "Failed to generate cover letter.";
+    return handleError(error, msg);
+  }
+};
+
+// Generates a short, tailored resume-summary snippet (2-3 sentences) for a
+// specific job, for the candidate to manually copy into their resume — never
+// writes back to the actual resume file. Same guardrail/rate-limit/resume-
+// resolution pattern as generateColdEmail; saved directly on the Job row
+// since it's not a standalone document like ColdEmail/CoverLetter.
+export const generateTailoredSummary = async (
+  profileId: string,
+  jobId: string
+): Promise<any | undefined> => {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    const rateLimit = checkRateLimit(user.id);
+    if (!rateLimit.allowed) {
+      throw new Error(
+        `Too many AI requests. Please wait ${Math.ceil(rateLimit.resetIn / 1000)} seconds and try again.`
+      );
+    }
+
+    const profile = await prisma.profile.findFirst({
+      where: { id: profileId, userId: user.id },
+    });
+    if (!profile) {
+      throw new Error("Profile not found");
+    }
+
+    const { job, success: jobSuccess } = await getJobDetails(jobId);
+    if (!jobSuccess || !job) {
+      throw new Error("Job not found");
+    }
+
+    const userRow = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { defaultResumeId: true },
+    });
+
+    let resumeId: string | null =
+      job.resumeId ?? userRow?.defaultResumeId ?? null;
+
+    if (!resumeId) {
+      const fallbackResume = await prisma.resume.findFirst({
+        where: { profileId },
+        orderBy: { createdAt: "desc" },
+      });
+      resumeId = fallbackResume?.id ?? null;
+    }
+
+    if (!resumeId) {
+      throw new Error(
+        "No resume found to tailor. Attach a resume to this job or add one to your profile first."
+      );
+    }
+
+    const { data: resume, success: resumeSuccess } = await getResumeById(
+      resumeId
+    );
+    if (!resumeSuccess || !resume) {
+      throw new Error("Resume not found");
+    }
+
+    const [resumePre, jobPre] = await Promise.all([
+      preprocessResume(resume),
+      preprocessJob(job),
+    ]);
+
+    if (!resumePre.success) {
+      throw new Error(resumePre.error.message);
+    }
+    if (!jobPre.success) {
+      throw new Error(jobPre.error.message);
+    }
+
+    const userSettings = await prisma.userSettings.findUnique({
+      where: { userId: user.id },
+    });
+    const ai = userSettings
+      ? {
+          ...defaultUserSettings.ai,
+          ...(JSON.parse(userSettings.settings).ai ?? {}),
+        }
+      : defaultUserSettings.ai;
+
+    const model = await getModel(ai.provider, ai.model || "llama3.2", user.id);
+
+    const language = await resolveJobLanguage(
+      user.id,
+      job,
+      jobPre.data.normalizedText,
+    );
+
+    const resumeText = truncateForProvider(resumePre.data.normalizedText, ai.provider, "RESUME");
+    const jobText = truncateForProvider(jobPre.data.normalizedText, ai.provider, "JOB");
+
+    const { content, warning } = await generateVerifiedContent({
+      model,
+      system: language === "de" ? TAILORED_SUMMARY_SYSTEM_PROMPT_DE : TAILORED_SUMMARY_SYSTEM_PROMPT,
+      prompt:
+        language === "de"
+          ? buildTailoredSummaryPromptDe(resumeText, jobText)
+          : buildTailoredSummaryPrompt(resumeText, jobText),
+      temperature: TEMPERATURES.FEEDBACK,
+      facts: {
+        resumeText,
+        jobText,
+      },
+      language,
+    });
+
+    await prisma.job.update({
+      where: { id: jobId, userId: user.id },
+      data: { tailoredSummary: content },
+    });
+
+    return { success: true, content, warning };
+  } catch (error) {
+    const msg = "Failed to generate tailored resume summary.";
     return handleError(error, msg);
   }
 };

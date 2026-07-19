@@ -58,6 +58,8 @@ import { AddJob } from "./AddJob";
 import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toast } from "../ui/use-toast";
 import { GenerateColdEmailButton } from "./GenerateColdEmailButton";
+import { GenerateCoverLetterButton } from "./GenerateCoverLetterButton";
+import { TailoredSummarySection } from "./TailoredSummarySection";
 import { AtsScoreSection } from "./AtsScoreSection";
 import { JobLanguageSelect } from "./JobLanguageSelect";
 import { SendEmailButton } from "./SendEmailButton";
@@ -194,6 +196,14 @@ function JobDetails({
           <GenerateColdEmailButton
             jobId={job.id}
             existingContent={job.ColdEmail?.content}
+          />
+          <GenerateCoverLetterButton
+            jobId={job.id}
+            existingContent={job.CoverLetter?.content}
+          />
+          <TailoredSummarySection
+            jobId={job.id}
+            initialSummary={job.tailoredSummary}
           />
           <AtsScoreSection
             jobId={job.id}

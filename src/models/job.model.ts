@@ -82,6 +82,7 @@ export interface JobResponse {
   atsScoreData?: string | null;
   language?: "en" | "de" | null;
   emailTo?: string | null;
+  tailoredSummary?: string | null;
   tags?: Tag[];
   createdVia?: string | null;
   discoveryStatus?: string | null;

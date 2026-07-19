@@ -4,6 +4,8 @@ import {
   updateCoverLetter,
   deleteCoverLetterById,
   generateColdEmail,
+  generateCoverLetter,
+  generateTailoredSummary,
 } from "@/actions/coverLetter.actions";
 import { getCurrentUser } from "@/utils/user.utils";
 import { getJobDetails } from "@/actions/job.actions";
@@ -70,6 +72,14 @@ vi.mock("@/lib/ai", () => ({
   buildColdEmailPrompt: (_resume: string, _job: string, company: string) => `EN_PROMPT:${company}`,
   COLD_EMAIL_SYSTEM_PROMPT_DE: "DE_SYSTEM",
   buildColdEmailPromptDe: (_resume: string, _job: string, company: string) => `DE_PROMPT:${company}`,
+  COVER_LETTER_SYSTEM_PROMPT: "CL_EN_SYSTEM",
+  buildCoverLetterPrompt: (_resume: string, _job: string, company: string) => `CL_EN_PROMPT:${company}`,
+  COVER_LETTER_SYSTEM_PROMPT_DE: "CL_DE_SYSTEM",
+  buildCoverLetterPromptDe: (_resume: string, _job: string, company: string) => `CL_DE_PROMPT:${company}`,
+  TAILORED_SUMMARY_SYSTEM_PROMPT: "SUMMARY_EN_SYSTEM",
+  buildTailoredSummaryPrompt: (_resume: string, _job: string) => `SUMMARY_EN_PROMPT`,
+  TAILORED_SUMMARY_SYSTEM_PROMPT_DE: "SUMMARY_DE_SYSTEM",
+  buildTailoredSummaryPromptDe: (_resume: string, _job: string) => `SUMMARY_DE_PROMPT`,
   generateVerifiedContent: generateVerifiedContentMock,
   checkRateLimit: checkRateLimitMock,
 }));
@@ -601,6 +611,220 @@ describe("coverLetterActions", () => {
       expect(r2.success).toBe(true);
       expect(prisma.coldEmail.create).toHaveBeenCalledTimes(2);
       expect(prisma.job.update).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("generateCoverLetter — edge cases", () => {
+    function setupHappyPath() {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma.profile.findFirst as any).mockResolvedValue({ id: "profile-1", userId: "user-id" });
+      (getJobDetailsMock as any).mockResolvedValue({
+        success: true,
+        job: {
+          id: "job-1",
+          resumeId: null,
+          Company: { label: "Nordwind" },
+          JobTitle: { label: "Backend Engineer" },
+        },
+      });
+      (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: "resume-1" });
+      (getResumeById as any).mockResolvedValue({ success: true, data: { id: "resume-1", title: "My Resume" } });
+      preprocessResumeMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "Resume text with Node.js experience." },
+      });
+      preprocessJobMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "Job text for Backend Engineer role." },
+      });
+      (prisma.userSettings.findUnique as any).mockResolvedValue(null);
+      getModelMock.mockResolvedValue({ modelId: "mock-model" });
+      resolveJobLanguageMock.mockResolvedValue("en");
+      checkRateLimitMock.mockReturnValue({ allowed: true, remaining: 4, resetIn: 60000 });
+      generateVerifiedContentMock.mockResolvedValue({
+        content: "Generated cover letter body.",
+        verified: true,
+        unsupportedClaims: [],
+        attempts: 1,
+        warning: null,
+      });
+      (prisma.coverLetter.create as any).mockResolvedValue({ id: "cl-1", content: "Generated cover letter body." });
+      (prisma.job.update as any).mockResolvedValue({});
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      setupHappyPath();
+    });
+
+    it("succeeds on the happy path, saving and linking a CoverLetter", async () => {
+      const result = await generateCoverLetter("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.content).toBe("Generated cover letter body.");
+      expect(prisma.coverLetter.create).toHaveBeenCalledWith({
+        data: { profileId: "profile-1", title: "Nordwind - Backend Engineer", content: "Generated cover letter body." },
+      });
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-1", userId: "user-id" },
+        data: { coverLetterId: "cl-1" },
+      });
+    });
+
+    it("rejects with a clear message when the user is rate limited, without calling the model", async () => {
+      checkRateLimitMock.mockReturnValue({ allowed: false, remaining: 0, resetIn: 42000 });
+      const result = await generateCoverLetter("profile-1", "job-1");
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/too many ai requests/i);
+      expect(generateVerifiedContentMock).not.toHaveBeenCalled();
+    });
+
+    it("fails cleanly when no resume can be resolved", async () => {
+      (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: null });
+      (prisma.resume.findFirst as any).mockResolvedValue(null);
+
+      const result = await generateCoverLetter("profile-1", "job-1");
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/no resume/i);
+      expect(generateVerifiedContentMock).not.toHaveBeenCalled();
+    });
+
+    it("routes to the German cover-letter prompt pair when resolveJobLanguage returns 'de'", async () => {
+      resolveJobLanguageMock.mockResolvedValue("de");
+      await generateCoverLetter("profile-1", "job-1");
+
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      expect(callArgs.system).toBe("CL_DE_SYSTEM");
+      expect(callArgs.prompt).toContain("CL_DE_PROMPT");
+      expect(callArgs.language).toBe("de");
+    });
+
+    it("routes to the English cover-letter prompt pair when resolveJobLanguage returns 'en'", async () => {
+      const result = await generateCoverLetter("profile-1", "job-1");
+      expect(result.success).toBe(true);
+
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      expect(callArgs.system).toBe("CL_EN_SYSTEM");
+      expect(callArgs.prompt).toContain("CL_EN_PROMPT");
+      expect(callArgs.language).toBe("en");
+    });
+
+    it("surfaces the warning from generateVerifiedContent without discarding content", async () => {
+      generateVerifiedContentMock.mockResolvedValue({
+        content: "Flagged letter content.",
+        verified: false,
+        unsupportedClaims: ["fake claim"],
+        attempts: 2,
+        warning: "Please review before sending.",
+      });
+      const result = await generateCoverLetter("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.content).toBe("Flagged letter content.");
+      expect(result.warning).toBe("Please review before sending.");
+    });
+  });
+
+  describe("generateTailoredSummary — edge cases", () => {
+    function setupHappyPath() {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma.profile.findFirst as any).mockResolvedValue({ id: "profile-1", userId: "user-id" });
+      (getJobDetailsMock as any).mockResolvedValue({
+        success: true,
+        job: {
+          id: "job-1",
+          resumeId: null,
+          Company: { label: "Nordwind" },
+          JobTitle: { label: "Backend Engineer" },
+        },
+      });
+      (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: "resume-1" });
+      (getResumeById as any).mockResolvedValue({ success: true, data: { id: "resume-1", title: "My Resume" } });
+      preprocessResumeMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "Resume text with Node.js experience." },
+      });
+      preprocessJobMock.mockResolvedValue({
+        success: true,
+        data: { normalizedText: "Job text for Backend Engineer role." },
+      });
+      (prisma.userSettings.findUnique as any).mockResolvedValue(null);
+      getModelMock.mockResolvedValue({ modelId: "mock-model" });
+      resolveJobLanguageMock.mockResolvedValue("en");
+      checkRateLimitMock.mockReturnValue({ allowed: true, remaining: 4, resetIn: 60000 });
+      generateVerifiedContentMock.mockResolvedValue({
+        content: "Backend engineer with Node.js experience relevant to this role.",
+        verified: true,
+        unsupportedClaims: [],
+        attempts: 1,
+        warning: null,
+      });
+      (prisma.job.update as any).mockResolvedValue({});
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      setupHappyPath();
+    });
+
+    it("succeeds on the happy path, saving the summary directly on the Job row (no separate document)", async () => {
+      const result = await generateTailoredSummary("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.content).toBe("Backend engineer with Node.js experience relevant to this role.");
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-1", userId: "user-id" },
+        data: { tailoredSummary: "Backend engineer with Node.js experience relevant to this role." },
+      });
+    });
+
+    it("rejects with a clear message when the user is rate limited, without calling the model", async () => {
+      checkRateLimitMock.mockReturnValue({ allowed: false, remaining: 0, resetIn: 42000 });
+      const result = await generateTailoredSummary("profile-1", "job-1");
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/too many ai requests/i);
+      expect(generateVerifiedContentMock).not.toHaveBeenCalled();
+    });
+
+    it("fails cleanly when no resume can be resolved", async () => {
+      (prisma.user.findUnique as any).mockResolvedValue({ defaultResumeId: null });
+      (prisma.resume.findFirst as any).mockResolvedValue(null);
+
+      const result = await generateTailoredSummary("profile-1", "job-1");
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/no resume/i);
+      expect(generateVerifiedContentMock).not.toHaveBeenCalled();
+    });
+
+    it("routes to the German tailored-summary prompt pair when resolveJobLanguage returns 'de'", async () => {
+      resolveJobLanguageMock.mockResolvedValue("de");
+      await generateTailoredSummary("profile-1", "job-1");
+
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      expect(callArgs.system).toBe("SUMMARY_DE_SYSTEM");
+      expect(callArgs.prompt).toBe("SUMMARY_DE_PROMPT");
+      expect(callArgs.language).toBe("de");
+    });
+
+    it("routes to the English tailored-summary prompt pair when resolveJobLanguage returns 'en'", async () => {
+      const result = await generateTailoredSummary("profile-1", "job-1");
+      expect(result.success).toBe(true);
+
+      const callArgs = generateVerifiedContentMock.mock.calls[0][0];
+      expect(callArgs.system).toBe("SUMMARY_EN_SYSTEM");
+      expect(callArgs.prompt).toBe("SUMMARY_EN_PROMPT");
+      expect(callArgs.language).toBe("en");
+    });
+
+    it("surfaces the warning from generateVerifiedContent without discarding the summary", async () => {
+      generateVerifiedContentMock.mockResolvedValue({
+        content: "Flagged summary content.",
+        verified: false,
+        unsupportedClaims: ["fake claim"],
+        attempts: 2,
+        warning: "Please review before sending.",
+      });
+      const result = await generateTailoredSummary("profile-1", "job-1");
+      expect(result.success).toBe(true);
+      expect(result.content).toBe("Flagged summary content.");
+      expect(result.warning).toBe("Please review before sending.");
     });
   });
 });

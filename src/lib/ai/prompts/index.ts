@@ -44,3 +44,19 @@ export {
   ATS_KEYWORDS_SYSTEM_PROMPT,
   buildAtsKeywordsPrompt,
 } from "./ats-keywords";
+
+// Cover Letter exports (EN + DE)
+export {
+  COVER_LETTER_SYSTEM_PROMPT,
+  buildCoverLetterPrompt,
+  COVER_LETTER_SYSTEM_PROMPT_DE,
+  buildCoverLetterPromptDe,
+} from "./cover-letter";
+
+// Tailored Resume Summary exports (EN + DE)
+export {
+  TAILORED_SUMMARY_SYSTEM_PROMPT,
+  buildTailoredSummaryPrompt,
+  TAILORED_SUMMARY_SYSTEM_PROMPT_DE,
+  buildTailoredSummaryPromptDe,
+} from "./tailored-summary";

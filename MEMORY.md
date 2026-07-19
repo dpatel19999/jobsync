@@ -7,6 +7,16 @@ branches exist right now — only `main`. `main` is ahead of
 feature (below) confirmed passing; full suite not re-run this session per
 explicit instruction ("targeted tests only").
 
+**Recurring verification note**: `getCurrentUser()` (via next-auth's
+`auth()`) needs a real Next.js request context — it always fails when a
+verification script calls an exported server action directly. The working
+pattern (used for job-language and cover-letter/tailoring verification):
+stub a local no-op `node_modules/server-only` package, then call the
+*internal* steps a server action performs (preprocessing, `resolveJobLanguage`,
+`getModel`, `generateVerifiedContent`, the Prisma writes) directly against
+real `dev.db` + real Ollama, skipping only the `getCurrentUser()`/auth line
+itself. Always delete the script and the `server-only` stub afterward.
+
 **Important note on the previous session's chat-shift summary**: a later
 session was asked for a full audit of a supposed `feature/email-send`
 (emailTo field, Send Email button, Mark as Applied) and found **none of it
@@ -95,6 +105,28 @@ a past session's account was accurate.
    correctly, Gmail-redirect decoding confirmed exact full-body match. Fast,
    scoped task — full detail in ARCHITECTURE.md's "Static cold-email
    template" section.
+10. **Cover letter generation + resume tailoring**
+    (`feature/cover-letter-resume-tailoring`) — explicitly scoped as "move
+    fast, reuse infrastructure": `generateCoverLetter(profileId, jobId)` is
+    a structural copy of `generateColdEmail` (same guardrail pipeline, rate
+    limiting, resume resolution, `resolveJobLanguage`-based EN/DE routing),
+    saving a `CoverLetter` linked via `Job.coverLetterId`. New DIN 5008 +
+    B1-aware `src/lib/ai/prompts/cover-letter/` prompt pair, same pattern as
+    cold email's. `generateTailoredSummary(profileId, jobId)` reuses the
+    exact same pipeline again for a 2-3 sentence resume-tailoring snippet,
+    saved directly on a new nullable `Job.tailoredSummary` field (no
+    separate document model — it's a snippet, not a letter). UI: an
+    editable (not read-only) textarea (`TailoredSummarySection.tsx`) — user
+    copies it into their resume manually, nothing here ever writes to the
+    actual resume. No new guardrail logic was written for either feature.
+    Verified via a real, temporary script against local Ollama + real
+    `dev.db` (deleted after, fixtures cleaned up): cover letter generation
+    ~541s (172 words, correctly linked+persisted), tailored summary ~286s
+    (3 sentences, correctly persisted, resume object confirmed untouched).
+    Both surfaced the known llama3.1 fact-checker false-positive warning on
+    paraphrase-level claims (same pattern as cold email — not a new bug).
+    Full detail in ARCHITECTURE.md's "Cover letter generation + resume
+    tailoring" section.
 
 ## Known, accepted flakiness
 `AddJob.spec.tsx` — 2 form-submission tests time out at 5000ms **only**
@@ -120,15 +152,16 @@ just load-related.
 Gmail auto-tracking (confirm-on-downgrade, full OAuth) — next up. EN+DE ATS
 scoring ✅, cold email ✅, writing guardrails ✅, DIN 5008 + German B1 ✅,
 job-language persistence ✅, security hardening ✅, Send Email (compose-link
-v1) + Mark as Applied ✅. Still not started: CV+cover letter+cold email
-tailoring (docx+pdf output), JD-adaptive CV structure, company-mismatch
-guardrail, recruiter-persona weighted scoring, interview prep Q&A module,
-LinkedIn networking assistant (manual-send only).
+v1) + Mark as Applied ✅, cover letter generation ✅, resume-tailoring
+summary ✅. Still not started: docx/pdf CV export, JD-adaptive CV structure,
+company-mismatch guardrail, recruiter-persona weighted scoring, interview
+prep Q&A module, LinkedIn networking assistant (manual-send only).
 
 ## Corrections to keep in mind
-- `coverLetter.actions.ts` has **no AI generation** for the cover-letter CRUD
-  itself — pure manual Tiptap editor content. Cold email is the AI-generated
-  one in that file.
+- `coverLetter.actions.ts` now has **three AI-generation functions**
+  (`generateColdEmail`, `generateCoverLetter`, `generateTailoredSummary`)
+  alongside the original manual CRUD — if you see an old note claiming this
+  file has no AI generation, that's stale.
 - Language is now a **persisted per-job field** (`Job.language`), not
   fresh-detected per call — if you see code still calling `detectAtsLanguage`
   directly from an action (rather than through `resolveJobLanguage`), that's

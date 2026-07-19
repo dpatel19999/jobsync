@@ -4,14 +4,15 @@
 - `src/actions/job.actions.ts` — application CRUD, `JobStatus` is a data table (not
   a fixed enum), so custom statuses (Phone Screen, Technical Round, Final Round,
   Ghosted) are just rows, no code change needed.
-- `src/actions/coverLetter.actions.ts` — pure manual CRUD (title/content typed
-  into a Tiptap editor); **no AI generation lives here**, contrary to this
-  file's earlier assumption. The real AI-calling convention is in
-  `automation.actions.ts`'s `analyzeDiscoveredJob` (non-streaming `getModel()` +
-  `generateText()`) and in `src/app/api/ai/resume/match/route.ts` (streaming,
-  client-picked model). `generateColdEmail` (done — see MEMORY.md) lives in
-  `coverLetter.actions.ts` as a sibling to the CRUD functions, but borrows its
-  AI-calling shape from `automation.actions.ts`.
+- `src/actions/coverLetter.actions.ts` — cover letter CRUD (title/content typed
+  into a Tiptap editor) started as pure manual entry; **now also has AI
+  generation** — `generateColdEmail` ✅, `generateCoverLetter` ✅, and
+  `generateTailoredSummary` ✅ (resume-tailoring snippet) all live here as
+  siblings to the CRUD functions, sharing one resume/job-resolution +
+  guardrail pipeline. The underlying AI-calling convention traces back to
+  `automation.actions.ts`'s `analyzeDiscoveredJob` (non-streaming
+  `getModel()` + `generateText()`) and `src/app/api/ai/resume/match/route.ts`
+  (streaming, client-picked model).
 - `src/actions/resumeImport.actions.ts`, `profile.actions.ts` — Resume/CoverLetter
   models under a `Profile`, resumes have structured `ResumeSection`s already.
 - `src/actions/atsCompany.actions.ts` — NOTE: this "ATS" means Greenhouse/Lever job
@@ -41,16 +42,11 @@
 - `ColdEmail` (mirrors `CoverLetter`) — ✅ done
 - `JobKeyword`, `Job.atsScore`/`atsScoreData` — ✅ done (see below)
 - `PrepQuestion` (linked to `Job`, round type, question, draft answer)
-- `region`/`language` field on `Job` — **still not built, still deliberately
-  deferred** even now that the DIN-formatting phase has landed. Cold email's
-  EN/DE branch (see "Region/language module" below) reuses the ATS module's
-  fresh per-call language detection instead of a persisted field, same
-  choice ATS scoring made. A persisted, user-overridable field is a real
-  gap (a German company can post an English JD, or vice versa, and
-  detection-from-JD-text would guess wrong) but adding it means a schema
-  migration plus a UX decision on where a user overrides it — flagged for
-  review in DECISIONS.md rather than built without the user's input on the
-  UX question.
+- `language` field on `Job` — ✅ **done** (`feature/job-language`, merged).
+  Nullable, populated once on first detection, manually overridable — see
+  the "Job language persistence" section near the end of this file.
+- `tailoredSummary` field on `Job` — ✅ done (`feature/cover-letter-resume-
+  tailoring`) — see "Cover letter generation + resume tailoring" section.
 
 ## ATS keyword scoring module (done, branch `feature/ats-scoring`)
 
@@ -398,3 +394,60 @@ no Ollama call. Full AI generation is kept as an opt-in.
   verification above) confirmed the full body — both languages, umlauts,
   the "English version;" separator — arrived at Google exactly as rendered
   in the dialog.
+
+## Cover letter generation + resume tailoring (done, branch `feature/cover-letter-resume-tailoring`)
+
+Both features reuse the existing generation infrastructure exactly —
+`getModel()`/`generateText()` via `generateVerifiedContent` (factual-accuracy
++ writing-tell + German B1 guardrails), `checkRateLimit`, `resolveJobLanguage`
+(persisted `Job.language`, no fresh per-call re-detection), and
+`truncateForProvider`. No new guardrail logic was written.
+
+**Part 1 — `generateCoverLetter(profileId, jobId)`** (`coverLetter.actions.ts`):
+line-for-line the same shape as `generateColdEmail` (same auth/rate-limit
+gate, same resume resolution — job's own → user default → most recent
+profile resume, same `resolveJobLanguage` call, same `generateVerifiedContent`
+call) — only the prompt pair and the target model differ. New prompt module
+`src/lib/ai/prompts/cover-letter/` (`system.ts`/`user.ts` EN,
+`system-de.ts`/`user-de.ts` DE using `DIN_5008_EMAIL_STRUCTURE` +
+`GERMAN_B1_LANGUAGE_RULES` + `GERMAN_WRITING_TELL_RULES`, same imports
+`region-language.ts` already exposes for cold email). Structure: opening
+(role + interest) → 2-3 body paragraphs (resume facts mapped to JD
+requirements) → closing (call to action + sign-off), ~250-400 words. Saves a
+`CoverLetter` row and links `Job.coverLetterId` — identical persistence
+pattern to `ColdEmail`. UI: `GenerateCoverLetterButton.tsx`, a straight copy
+of `GenerateColdEmailButton.tsx`'s dialog pattern, added next to it on the
+job detail page.
+
+**Part 2 — `generateTailoredSummary(profileId, jobId)`** (same file): same
+pipeline again, but the output (2-3 sentences) is saved directly on
+`Job.tailoredSummary` (new nullable field, no separate document model — it's
+a snippet, not a standalone letter/email) rather than linked via a
+foreign key. New prompt module `src/lib/ai/prompts/tailored-summary/` — EN
+uses `AI_WRITING_TELL_RULES` same as everywhere else; DE uses
+`GERMAN_B1_LANGUAGE_RULES` + `GERMAN_WRITING_TELL_RULES` but deliberately
+*not* `DIN_5008_EMAIL_STRUCTURE`, since a resume summary snippet isn't a
+letter/email and has no salutation/subject-line structure to follow. UI:
+`TailoredSummarySection.tsx` — unlike the cold-email/cover-letter dialogs,
+its textarea is **editable, not read-only** (per requirement: the user
+tweaks wording before copying it into their actual resume by hand; nothing
+here ever writes to the resume file itself, only to `Job.tailoredSummary`).
+
+**Verified via a real, temporary script run against local Ollama + real
+`dev.db`** (`scripts/verify-cover-letter-tailoring.ts`, deleted after use,
+fixture rows cleaned up): both `generateVerifiedContent` calls exercised the
+real guardrail pipeline end to end (factual-accuracy check, writing-tell
+check) against a real fixture resume/job pair. Cover letter generation took
+~541s, produced a real 172-word letter, and persisted correctly linked via
+`Job.coverLetterId` → `CoverLetter.content`. Tailored summary generation
+took ~286s, produced a real 3-sentence summary, and persisted directly on
+`Job.tailoredSummary` — confirmed by construction to never touch the resume
+object (Part 2 receives resume text only, never a resume ID/file handle it
+could write to). Both calls surfaced the factual-accuracy guardrail's
+warning on paraphrase-level claims — the same known llama3.1 false-positive
+pattern already flagged for cold email, not a new issue.
+
+Not built (out of scope for this pass, not requested): a "save my edits
+back" action for the tailored-summary textarea — the field regenerates the
+same way each time; user edits are copy-paste-out only, matching the
+explicit requirement not to auto-edit the resume.

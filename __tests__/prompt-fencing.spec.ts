@@ -7,6 +7,12 @@ import { buildAtsKeywordsPrompt } from "@/lib/ai/prompts/ats-keywords/user";
 import { COLD_EMAIL_SYSTEM_PROMPT } from "@/lib/ai/prompts/cold-email/system";
 import { COLD_EMAIL_SYSTEM_PROMPT_DE } from "@/lib/ai/prompts/cold-email/system-de";
 import { ATS_KEYWORDS_SYSTEM_PROMPT } from "@/lib/ai/prompts/ats-keywords/system";
+import { buildCoverLetterPrompt } from "@/lib/ai/prompts/cover-letter/user";
+import { COVER_LETTER_SYSTEM_PROMPT } from "@/lib/ai/prompts/cover-letter/system";
+import { COVER_LETTER_SYSTEM_PROMPT_DE } from "@/lib/ai/prompts/cover-letter/system-de";
+import { buildTailoredSummaryPrompt } from "@/lib/ai/prompts/tailored-summary/user";
+import { TAILORED_SUMMARY_SYSTEM_PROMPT } from "@/lib/ai/prompts/tailored-summary/system";
+import { TAILORED_SUMMARY_SYSTEM_PROMPT_DE } from "@/lib/ai/prompts/tailored-summary/system-de";
 
 describe("fenceUntrustedContent", () => {
   it("wraps content in open/close markers", () => {
@@ -44,11 +50,27 @@ describe("prompt wiring", () => {
     expect(prompt.match(/<<<UNTRUSTED_DATA>>>/g)).toHaveLength(1);
   });
 
-  it("all three system prompts include the fencing rules", () => {
+  it("cover-letter user prompt fences both resume and job text", () => {
+    const prompt = buildCoverLetterPrompt("RESUME_TEXT", "JOB_TEXT", "Acme");
+    expect(prompt.match(/<<<UNTRUSTED_DATA>>>/g)).toHaveLength(2);
+    expect(prompt.match(/<<<END_UNTRUSTED_DATA>>>/g)).toHaveLength(2);
+  });
+
+  it("tailored-summary user prompt fences both resume and job text", () => {
+    const prompt = buildTailoredSummaryPrompt("RESUME_TEXT", "JOB_TEXT");
+    expect(prompt.match(/<<<UNTRUSTED_DATA>>>/g)).toHaveLength(2);
+    expect(prompt.match(/<<<END_UNTRUSTED_DATA>>>/g)).toHaveLength(2);
+  });
+
+  it("all system prompts include the fencing rules", () => {
     for (const sys of [
       COLD_EMAIL_SYSTEM_PROMPT,
       COLD_EMAIL_SYSTEM_PROMPT_DE,
       ATS_KEYWORDS_SYSTEM_PROMPT,
+      COVER_LETTER_SYSTEM_PROMPT,
+      COVER_LETTER_SYSTEM_PROMPT_DE,
+      TAILORED_SUMMARY_SYSTEM_PROMPT,
+      TAILORED_SUMMARY_SYSTEM_PROMPT_DE,
     ]) {
       expect(sys).toContain("UNTRUSTED DATA HANDLING");
     }

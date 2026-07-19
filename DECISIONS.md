@@ -428,3 +428,54 @@ Format: Decision — Rationale
   it always re-generates fresh rather than reusing a previously-saved
   `ColdEmail`, since the task scoped this as fast/minimal and a stale-vs-
   fresh cache policy wasn't asked for.
+
+- **`feature/cover-letter-resume-tailoring`: both `generateCoverLetter` and
+  `generateTailoredSummary` reuse the existing generation pipeline verbatim**
+  (`generateVerifiedContent`, `checkRateLimit`, `resolveJobLanguage`,
+  `truncateForProvider`) rather than building any new guardrail or
+  AI-calling logic — task explicitly asked to move fast and not rebuild
+  infrastructure that already exists and is tested. `generateCoverLetter` is
+  structurally identical to `generateColdEmail` (copy-pasted shape, not
+  extracted into a shared helper — three near-identical ~90-line functions
+  in one file was judged acceptable for "move fast," an extraction can
+  happen later if a fourth generation feature needs the same shape).
+- **Tailored resume summary saved directly on `Job.tailoredSummary`, not as
+  a new standalone document model** — unlike `ColdEmail`/`CoverLetter`, it's
+  a short snippet with no independent identity (title, list view, etc.), so
+  a plain nullable string field was the simpler, faster fit. It is
+  deliberately never written back into the actual `Resume` record — the
+  task explicitly required manual copy-paste only, and the UI textarea is
+  editable (not read-only, unlike the cold-email/cover-letter dialogs) so
+  the user can adjust wording before copying, but those in-browser edits
+  are not persisted anywhere; only a fresh `generateTailoredSummary` call
+  overwrites the saved value.
+- **Tailored summary's German prompt uses `GERMAN_B1_LANGUAGE_RULES` +
+  `GERMAN_WRITING_TELL_RULES` but not `DIN_5008_EMAIL_STRUCTURE`** — DIN 5008
+  governs letter/email structure (Betreff line, salutation, closing), which
+  doesn't apply to a resume-summary snippet with no such structure. The B1
+  language cap still applies since it's a language-quality rule, not a
+  structural one.
+- **Verified via a real, temporary script (`scripts/verify-cover-letter-
+  tailoring.ts`, deleted after use) against local Ollama + real `dev.db`**,
+  reusing the same auth-bypass approach as the prior `feature/job-language`
+  verification (`getCurrentUser()`'s `auth()` needs a real Next.js request
+  context a plain script doesn't have — confirmed again here; every other
+  step, including both live `generateVerifiedContent` calls and the Prisma
+  writes, is the real production code path). Cover letter generation took
+  **~541s (~9 min)**, produced a real 172-word multi-paragraph English
+  letter referencing the fixture resume's Node.js/PostgreSQL/Docker
+  experience and "Acme GmbH" by name, and correctly persisted
+  (`Job.coverLetterId` → `CoverLetter.content`, both confirmed via a fresh
+  DB read). Tailored summary generation took **~286s (~4.8 min)**, produced
+  a real 3-sentence summary, and correctly persisted directly on
+  `Job.tailoredSummary` (confirmed via a fresh DB read); the resume object
+  passed in was never mutated (Part 2 receives resume *text*, never a
+  resume ID or file handle it could write to). Both calls triggered the
+  factual-accuracy guardrail's warning path on paraphrase-level claims
+  (e.g. "from December 2021" vs. resume's "Dec 2021 - Present", "downtown
+  office" vs. job description's non-identical phrasing) — this is the same
+  known llama3.1 false-positive pattern already flagged for the cold-email
+  guardrail (see the writing-guardrails entries above), not a new bug;
+  content was still returned with the warning surfaced, per the
+  warn-don't-block design. All fixture rows (job, cover letter, profile,
+  job title, company) cleaned up afterward.
