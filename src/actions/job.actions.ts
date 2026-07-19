@@ -240,6 +240,7 @@ export const getJobDetails = async (
         Resume: {
           include: {
             File: true,
+            ContactInfo: true,
           },
         },
         CoverLetter: true,
@@ -542,6 +543,64 @@ export const resolveJobLanguage = async (
     data: { language },
   });
   return language;
+};
+
+// Recipient for the Gmail-compose "Send Email" button (v1: compose-window
+// only). Set/edited from the Send Email dialog on the job detail page.
+export const updateJobEmailTo = async (
+  jobId: string,
+  emailTo: string,
+): Promise<any | undefined> => {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    const job = await prisma.job.update({
+      where: {
+        id: jobId,
+        userId: user.id,
+      },
+      data: { emailTo },
+    });
+    return { job, success: true };
+  } catch (error) {
+    const msg = "Failed to update recipient email.";
+    return handleError(error, msg);
+  }
+};
+
+// Standalone "Mark as Applied" toggle, independent of the status dropdown's
+// own applied-on-status-change logic (updateJobStatus above) — lets the user
+// flip the applied flag directly after sending an email, without also
+// forcing a status change.
+export const toggleJobApplied = async (
+  jobId: string,
+  applied: boolean,
+): Promise<any | undefined> => {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    const job = await prisma.job.update({
+      where: {
+        id: jobId,
+        userId: user.id,
+      },
+      data: {
+        applied,
+        appliedDate: applied ? new Date() : null,
+      },
+    });
+    revalidatePath("/dashboard");
+    return { job, success: true };
+  } catch (error) {
+    const msg = "Failed to update applied status.";
+    return handleError(error, msg);
+  }
 };
 
 export const saveJobMatchResult = async (

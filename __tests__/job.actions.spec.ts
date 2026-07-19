@@ -8,7 +8,9 @@ import {
   getStatusList,
   resolveJobLanguage,
   saveJobMatchResult,
+  toggleJobApplied,
   updateJob,
+  updateJobEmailTo,
   updateJobLanguage,
   updateJobStatus,
 } from "@/actions/job.actions";
@@ -720,6 +722,7 @@ describe("jobActions", () => {
         Resume: {
           include: {
             File: true,
+            ContactInfo: true,
           },
         },
         CoverLetter: true,
@@ -1076,6 +1079,98 @@ describe("jobActions", () => {
         where: { id: "job-id", userId: mockUser.id },
         data: { language: "de" },
       });
+    });
+  });
+
+  describe("updateJobEmailTo", () => {
+    it("persists the recipient email for the Send Email button", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma.job.update as any).mockResolvedValue({
+        id: "job-id",
+        emailTo: "recruiter@example.com",
+      });
+
+      const result = await updateJobEmailTo(
+        "job-id",
+        "recruiter@example.com",
+      );
+
+      expect(result).toStrictEqual({
+        job: { id: "job-id", emailTo: "recruiter@example.com" },
+        success: true,
+      });
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-id", userId: mockUser.id },
+        data: { emailTo: "recruiter@example.com" },
+      });
+    });
+
+    it("returns an auth error when not signed in", async () => {
+      (getCurrentUser as any).mockResolvedValue(null);
+
+      await expect(
+        updateJobEmailTo("job-id", "recruiter@example.com"),
+      ).resolves.toStrictEqual({
+        success: false,
+        message: "Not authenticated",
+      });
+      expect(prisma.job.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("toggleJobApplied", () => {
+    it("marks the job applied and sets appliedDate", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      const now = new Date("2026-07-19T12:00:00Z");
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      (prisma.job.update as any).mockResolvedValue({
+        id: "job-id",
+        applied: true,
+        appliedDate: now,
+      });
+
+      const result = await toggleJobApplied("job-id", true);
+
+      expect(result).toStrictEqual({
+        job: { id: "job-id", applied: true, appliedDate: now },
+        success: true,
+      });
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-id", userId: mockUser.id },
+        data: { applied: true, appliedDate: now },
+      });
+      vi.useRealTimers();
+    });
+
+    it("marks the job not applied and clears appliedDate", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma.job.update as any).mockResolvedValue({
+        id: "job-id",
+        applied: false,
+        appliedDate: null,
+      });
+
+      const result = await toggleJobApplied("job-id", false);
+
+      expect(result).toStrictEqual({
+        job: { id: "job-id", applied: false, appliedDate: null },
+        success: true,
+      });
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: "job-id", userId: mockUser.id },
+        data: { applied: false, appliedDate: null },
+      });
+    });
+
+    it("returns an auth error when not signed in", async () => {
+      (getCurrentUser as any).mockResolvedValue(null);
+
+      await expect(toggleJobApplied("job-id", true)).resolves.toStrictEqual({
+        success: false,
+        message: "Not authenticated",
+      });
+      expect(prisma.job.update).not.toHaveBeenCalled();
     });
   });
 

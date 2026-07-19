@@ -379,3 +379,40 @@ Format: Decision — Rationale
   backstop against a malicious email steering the tracker; (f) login/signup
   rate limiting (see auth review above) becomes non-theoretical once a
   Gmail-connected app holds OAuth tokens worth stealing.
+
+- **`feature/email-send` (v1) is a Gmail compose-window deep link only —
+  deliberately separate from the full-OAuth "Gmail integration" scoped
+  above.** No token, no scope, no API call: `buildGmailComposeUrl`
+  (`src/lib/gmail-compose.ts`) builds `https://mail.google.com/mail/?view=cm&
+  to=...&su=...&body=...` via `URLSearchParams` (which percent-encodes
+  everything, including line breaks, correctly on its own — no manual
+  `encodeURIComponent` needed) and the button just `window.open`s it in a new
+  tab. The user reviews and clicks Send inside their own logged-in Gmail;
+  nothing here ever touches their credentials or inbox. Default subject is
+  `Application — {sender name} — {job title}`, sender name pulled from
+  `job.Resume.ContactInfo` (added to the `getJobDetails` include) rather than
+  a new profile field, since that's already the resume tied to the job.
+- **`Job.emailTo` captured via the Send Email dialog itself, not added to the
+  full Add/Edit Job form.** Scope call for a "lightweight v1" — the dialog
+  already needs a recipient input, and `updateJobEmailTo` persists it there
+  so later opens prefill; adding a redundant field to the large existing
+  job form would be scope creep for no behavior gain.
+- **"Mark as Applied" is a standalone toggle (`toggleJobApplied`), separate
+  from `updateJobStatus`'s existing applied-on-status-change side effect.**
+  The existing status dropdown already flips `Job.applied` when status
+  becomes "applied"/"interview" — but that requires opening the status
+  submenu. The new toggle button lets applied be set/unset directly (e.g.
+  right after using Send Email) without also forcing a status change;
+  toggling off clears `appliedDate` back to null rather than leaving a stale
+  timestamp.
+- **Click-through verification method for the Gmail link**: no real Google
+  account is available to this session, so a Playwright run against a
+  throwaway fixture user/job showed the actual behavior of an unauthenticated
+  browser opening the built URL — Google's own `accounts.google.com` sign-in
+  gateway, which preserves the full original destination byte-for-byte in its
+  `continue=` param. Decoding that param and reading its `to`/`su`/`body`
+  confirmed exact matches (including the umlaut/`&`/line-break body content)
+  against what the button was given. This is the honest ceiling of automated
+  proof without real Google credentials: it confirms Google's servers
+  received the exact correct compose parameters, not that Gmail's own
+  compose UI visually renders them (that step needs the user's real login).
